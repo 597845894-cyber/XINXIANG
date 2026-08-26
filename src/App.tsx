@@ -24,7 +24,7 @@ import {
 import { useEffect, useState, type ComponentType } from "react";
 
 import type { AppRouteId } from "./contracts/v1";
-import { isDesktopRuntime, quitDesktopApp } from "./platform/desktop";
+import { getSecurityStatus, isDesktopRuntime, quitDesktopApp } from "./platform/desktop";
 
 type NavItem = {
   id: AppRouteId;
@@ -372,6 +372,21 @@ function TasksView() {
 }
 
 function SettingsView() {
+  const [securityStatus, setSecurityStatus] = useState<"idle" | "checking" | "verified" | "failed">(
+    "idle",
+  );
+
+  async function runSecurityCheck() {
+    if (!isDesktopRuntime()) return;
+    setSecurityStatus("checking");
+    try {
+      await getSecurityStatus();
+      setSecurityStatus("verified");
+    } catch {
+      setSecurityStatus("failed");
+    }
+  }
+
   return (
     <section className="content-page settings-page" aria-labelledby="settings-title">
       <div className="page-intro">
@@ -415,6 +430,29 @@ function SettingsView() {
           </div>
           <button className="secondary-button" type="button">
             查看存储位置
+          </button>
+        </section>
+        <section className="security-check">
+          <div className="settings-icon">
+            <ShieldCheck size={20} />
+          </div>
+          <div className="setting-copy">
+            <h3>本地安全检查</h3>
+            <p>
+              {securityStatus === "verified"
+                ? "已确认：当前用户保护、SQLCipher、附件加密和业务断网边界均可用。"
+                : securityStatus === "failed"
+                  ? "检查未完成。请确认应用数据目录可写后再试。"
+                  : "主密钥受当前 Windows 用户保护；通知数据不连接云端。"}
+            </p>
+          </div>
+          <button
+            className="secondary-button"
+            disabled={!isDesktopRuntime() || securityStatus === "checking"}
+            onClick={() => void runSecurityCheck()}
+            type="button"
+          >
+            {securityStatus === "checking" ? "检查中" : "运行检查"}
           </button>
         </section>
       </div>

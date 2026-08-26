@@ -16,6 +16,7 @@ describe("application contract v1", () => {
       "settings",
     ]);
     expect(contract.commands).toContain("getModelResourceStatus");
+    expect(contract.commands).toContain("getSecurityStatus");
     expect(contract.commands).toContain("installModelResources");
   });
 

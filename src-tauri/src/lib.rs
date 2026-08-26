@@ -1,8 +1,10 @@
 mod contracts;
 mod model_resources;
+pub mod observability;
 pub mod security;
+pub mod storage;
 
-use contracts::AppBootstrapV1;
+use contracts::{AppBootstrapV1, SecurityStatusV1};
 use model_resources::{
     inspect_resources, install_resources, install_root, selected_manifest, ModelResourceStatusV1,
 };
@@ -20,6 +22,16 @@ const PLACEHOLDER_MODEL_MANIFEST: &str =
 #[tauri::command(rename_all = "camelCase")]
 fn get_app_bootstrap() -> AppBootstrapV1 {
     AppBootstrapV1::current()
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn get_security_status(app: AppHandle) -> Result<SecurityStatusV1, String> {
+    let app_data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| "LOCAL_SECURITY_CHECK_FAILED".to_owned())?;
+    security::status::verify_local_security(&app_data_dir)
+        .map_err(|_| "LOCAL_SECURITY_CHECK_FAILED".to_owned())
 }
 
 #[tauri::command]
@@ -131,6 +143,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_app_bootstrap,
+            get_security_status,
             get_model_resource_status,
             install_model_resources,
             open_quick_import,

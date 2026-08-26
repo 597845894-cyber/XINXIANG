@@ -10,6 +10,7 @@
   ],
   "commands": [
     "getAppBootstrap",
+    "getSecurityStatus",
     "getModelResourceStatus",
     "installModelResources",
     "openQuickImport",

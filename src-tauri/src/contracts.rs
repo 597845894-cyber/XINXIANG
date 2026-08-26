@@ -16,6 +16,7 @@ pub enum AppRouteId {
 #[serde(rename_all = "camelCase")]
 pub enum CommandName {
     GetAppBootstrap,
+    GetSecurityStatus,
     GetModelResourceStatus,
     InstallModelResources,
     OpenQuickImport,
@@ -44,6 +45,30 @@ pub struct AppBootstrapV1 {
     pub routes: Vec<RouteDescriptorV1>,
     pub commands: Vec<CommandName>,
     pub events: Vec<EventName>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecurityStatusV1 {
+    pub schema_version: u16,
+    pub master_key: String,
+    pub database: String,
+    pub attachments: String,
+    pub business_networking: String,
+    pub updater: String,
+}
+
+impl SecurityStatusV1 {
+    pub fn verified() -> Self {
+        Self {
+            schema_version: CONTRACT_VERSION,
+            master_key: "currentWindowsUserProtected".to_owned(),
+            database: "sqlCipherVerified".to_owned(),
+            attachments: "aes256Gcm".to_owned(),
+            business_networking: "blocked".to_owned(),
+            updater: "disabled".to_owned(),
+        }
+    }
 }
 
 impl AppBootstrapV1 {
@@ -75,6 +100,7 @@ impl AppBootstrapV1 {
             ],
             commands: vec![
                 CommandName::GetAppBootstrap,
+                CommandName::GetSecurityStatus,
                 CommandName::GetModelResourceStatus,
                 CommandName::InstallModelResources,
                 CommandName::OpenQuickImport,

@@ -4,6 +4,7 @@ export type AppRouteId = "inbox" | "quickImport" | "review" | "tasks" | "setting
 
 export type CommandName =
   | "getAppBootstrap"
+  | "getSecurityStatus"
   | "getModelResourceStatus"
   | "installModelResources"
   | "openQuickImport"
@@ -24,6 +25,15 @@ export interface ModelResourceStatusV1 {
   issues: ModelResourceIssueV1[];
   recoveryAction: string | null;
   networkRequired: false;
+}
+
+export interface SecurityStatusV1 {
+  schemaVersion: 1;
+  masterKey: "currentWindowsUserProtected";
+  database: "sqlCipherVerified";
+  attachments: "aes256Gcm";
+  businessNetworking: "blocked";
+  updater: "disabled";
 }
 
 export type EventName = "quickImportRequested" | "windowHiddenToTray";
