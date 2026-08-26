@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "text-relative-date",
+  "input": {
+    "kind": "text",
+    "noticePublishedAt": "2026-09-07T08:15:00+08:00",
+    "timezone": "Asia/Shanghai",
+    "text": "请课代表本周五16:00前把实验报告纸质版交到理科楼B203。"
+  },
+  "coverage": ["text", "relative-date"],
+  "expected": {
+    "category": "required-action",
+    "changeIntent": "none",
+    "taskCount": 1,
+    "tasks": [
+      {
+        "title": "提交实验报告纸质版",
+        "deadline": "2026-09-11T16:00:00+08:00",
+        "deadlineExpression": "本周五16:00前",
+        "locationOrEntry": "理科楼B203",
+        "materials": ["实验报告纸质版"],
+        "audience": "课代表",
+        "required": true,
+        "evidence": ["本周五16:00前把实验报告纸质版交到理科楼B203"]
+      }
+    ],
+    "uncertainties": []
+  }
+}

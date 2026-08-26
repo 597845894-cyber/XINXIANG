@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "text-missing-time",
+  "input": {
+    "kind": "text",
+    "noticePublishedAt": "2026-09-05T14:00:00+08:00",
+    "timezone": "Asia/Shanghai",
+    "text": "请家庭经济困难学生登录资助系统补充银行卡信息，完成后在班级群回复已完成。"
+  },
+  "coverage": ["text", "missing-time"],
+  "expected": {
+    "category": "required-action",
+    "changeIntent": "none",
+    "taskCount": 1,
+    "tasks": [
+      {
+        "title": "补充银行卡信息",
+        "deadline": null,
+        "locationOrEntry": "资助系统",
+        "audience": "家庭经济困难学生",
+        "required": true,
+        "evidence": ["登录资助系统补充银行卡信息"]
+      }
+    ],
+    "uncertainties": ["missing-deadline"]
+  }
+}

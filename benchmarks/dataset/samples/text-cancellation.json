@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "text-cancellation",
+  "input": {
+    "kind": "text",
+    "noticePublishedAt": "2026-09-10T16:00:00+08:00",
+    "timezone": "Asia/Shanghai",
+    "text": "【取消通知】因场地维修，原定9月13日举行的新生体育测试取消，新的安排另行通知。"
+  },
+  "coverage": ["text", "cancellation"],
+  "expected": {
+    "category": "result-or-change",
+    "changeIntent": "cancel",
+    "taskCount": 0,
+    "tasks": [],
+    "uncertainties": ["relation-target-required"]
+  }
+}

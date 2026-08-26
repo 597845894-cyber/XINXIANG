@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "text-multiple-tasks",
+  "input": {
+    "kind": "text",
+    "noticePublishedAt": "2026-09-04T11:00:00+08:00",
+    "timezone": "Asia/Shanghai",
+    "text": "迎新志愿者请先于9月6日20:00前填写报名表，再于9月7日12:00前到学院办公室领取工作证，9月8日7:30在图书馆南门参加培训。"
+  },
+  "coverage": ["text", "multiple-tasks"],
+  "expected": {
+    "category": "schedule",
+    "changeIntent": "none",
+    "taskCount": 3,
+    "tasks": [
+      {
+        "title": "填写迎新志愿者报名表",
+        "deadline": "2026-09-06T20:00:00+08:00",
+        "evidence": ["9月6日20:00前填写报名表"]
+      },
+      {
+        "title": "领取迎新工作证",
+        "deadline": "2026-09-07T12:00:00+08:00",
+        "locationOrEntry": "学院办公室",
+        "evidence": ["9月7日12:00前到学院办公室领取工作证"]
+      },
+      {
+        "title": "参加迎新志愿者培训",
+        "start": "2026-09-08T07:30:00+08:00",
+        "locationOrEntry": "图书馆南门",
+        "evidence": ["9月8日7:30在图书馆南门参加培训"]
+      }
+    ],
+    "uncertainties": []
+  }
+}

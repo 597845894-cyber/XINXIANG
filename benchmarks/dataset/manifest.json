@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "datasetId": "xinxiang-campus-notices-synthetic-v1",
+  "language": "zh-CN",
+  "privacy": "synthetic-only",
+  "description": "Synthetic campus notice fixtures. No real names, accounts, groups, phone numbers, or student data are included.",
+  "requiredCoverage": [
+    "text",
+    "clear-screenshot",
+    "long-screenshot",
+    "multiple-tasks",
+    "missing-time",
+    "relative-date",
+    "conflict",
+    "reschedule",
+    "cancellation",
+    "information-only"
+  ],
+  "samples": [
+    "text-required-absolute.json",
+    "image-clear-relative.json",
+    "image-long-multiple-tasks.json",
+    "text-multiple-tasks.json",
+    "text-missing-time.json",
+    "text-relative-date.json",
+    "text-conflict.json",
+    "text-reschedule.json",
+    "text-cancellation.json",
+    "text-information-only.json"
+  ]
+}

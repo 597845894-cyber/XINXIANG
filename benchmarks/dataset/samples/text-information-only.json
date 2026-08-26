@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "text-information-only",
+  "input": {
+    "kind": "text",
+    "noticePublishedAt": "2026-09-11T09:00:00+08:00",
+    "timezone": "Asia/Shanghai",
+    "text": "图书馆今日起恢复秋季开放时间，一楼自习区照常开放。请大家相互转告。"
+  },
+  "coverage": ["text", "information-only"],
+  "expected": {
+    "category": "information-only",
+    "changeIntent": "none",
+    "taskCount": 0,
+    "tasks": [],
+    "uncertainties": []
+  }
+}

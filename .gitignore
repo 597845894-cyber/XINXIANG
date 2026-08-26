@@ -39,6 +39,9 @@ fixtures/private/
 
 # Local model binaries
 models/
+benchmarks/models/
+benchmarks/cache/
+benchmarks/results/raw/
 *.gguf
 *.onnx
 *.ort

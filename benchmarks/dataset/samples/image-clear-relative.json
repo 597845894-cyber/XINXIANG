@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "image-clear-relative",
+  "input": {
+    "kind": "image",
+    "noticePublishedAt": "2026-09-02T10:20:00+08:00",
+    "timezone": "Asia/Shanghai",
+    "asset": "../images/clear-relative.png",
+    "referenceText": "班级通知\n请全体同学明天17:00前完成实验室安全考试。\n入口：校园安全学习平台"
+  },
+  "coverage": ["clear-screenshot", "relative-date"],
+  "expected": {
+    "category": "required-action",
+    "changeIntent": "none",
+    "taskCount": 1,
+    "tasks": [
+      {
+        "title": "完成实验室安全考试",
+        "deadline": "2026-09-03T17:00:00+08:00",
+        "deadlineExpression": "明天17:00前",
+        "locationOrEntry": "校园安全学习平台",
+        "materials": [],
+        "audience": "全体同学",
+        "required": true,
+        "evidence": ["请全体同学明天17:00前完成实验室安全考试", "入口：校园安全学习平台"]
+      }
+    ],
+    "uncertainties": []
+  }
+}

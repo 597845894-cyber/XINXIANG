@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "text-conflict",
+  "input": {
+    "kind": "text",
+    "noticePublishedAt": "2026-09-08T10:00:00+08:00",
+    "timezone": "Asia/Shanghai",
+    "text": "课程群通知：作业提交截止时间为9月10日18:00。附件说明中写的是9月11日18:00，请大家提交前向任课教师确认。"
+  },
+  "coverage": ["text", "conflict"],
+  "expected": {
+    "category": "required-action",
+    "changeIntent": "none",
+    "taskCount": 1,
+    "tasks": [
+      {
+        "title": "提交课程作业",
+        "deadline": null,
+        "required": true,
+        "evidence": ["截止时间为9月10日18:00", "附件说明中写的是9月11日18:00"]
+      }
+    ],
+    "uncertainties": ["conflicting-deadline"]
+  }
+}

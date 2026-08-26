@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "id": "image-long-multiple-tasks",
+  "input": {
+    "kind": "image",
+    "noticePublishedAt": "2026-09-03T09:00:00+08:00",
+    "timezone": "Asia/Shanghai",
+    "asset": "../images/long-multiple-tasks.png",
+    "referenceText": "志愿服务活动安排\n面向2025级学生开展社区志愿服务。\n第一步：9月5日12:00前在第二课堂平台完成报名。\n第二步：9月6日18:00前将安全承诺书PDF发送到活动页面。\n第三步：9月8日8:30在东门集合，携带学生证参加活动。\n活动自愿参加，完成后可记录志愿时长。"
+  },
+  "coverage": ["long-screenshot", "multiple-tasks"],
+  "expected": {
+    "category": "voluntary",
+    "changeIntent": "none",
+    "taskCount": 3,
+    "tasks": [
+      {
+        "title": "报名社区志愿服务",
+        "deadline": "2026-09-05T12:00:00+08:00",
+        "locationOrEntry": "第二课堂平台",
+        "materials": [],
+        "audience": "2025级学生",
+        "required": false,
+        "evidence": ["9月5日12:00前在第二课堂平台完成报名"]
+      },
+      {
+        "title": "提交安全承诺书",
+        "deadline": "2026-09-06T18:00:00+08:00",
+        "locationOrEntry": "活动页面",
+        "materials": ["安全承诺书PDF"],
+        "audience": "2025级学生",
+        "required": false,
+        "evidence": ["9月6日18:00前将安全承诺书PDF发送到活动页面"]
+      },
+      {
+        "title": "参加社区志愿服务",
+        "start": "2026-09-08T08:30:00+08:00",
+        "locationOrEntry": "东门",
+        "materials": ["学生证"],
+        "audience": "2025级学生",
+        "required": false,
+        "evidence": ["9月8日8:30在东门集合，携带学生证参加活动"]
+      }
+    ],
+    "uncertainties": []
+  }
+}

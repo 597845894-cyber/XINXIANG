@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "text-required-absolute",
+  "input": {
+    "kind": "text",
+    "noticePublishedAt": "2026-09-01T08:00:00+08:00",
+    "timezone": "Asia/Shanghai",
+    "text": "【材料提交】请2026级本科生于9月3日17:00前登录教务系统提交学籍信息确认表，并准备学生证电子版。"
+  },
+  "coverage": ["text"],
+  "expected": {
+    "category": "required-action",
+    "changeIntent": "none",
+    "taskCount": 1,
+    "tasks": [
+      {
+        "title": "提交学籍信息确认表",
+        "deadline": "2026-09-03T17:00:00+08:00",
+        "locationOrEntry": "教务系统",
+        "materials": ["学生证电子版"],
+        "audience": "2026级本科生",
+        "required": true,
+        "evidence": ["于9月3日17:00前登录教务系统提交学籍信息确认表", "准备学生证电子版"]
+      }
+    ],
+    "uncertainties": []
+  }
+}
