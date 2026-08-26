@@ -2,6 +2,9 @@ import { execFile, spawn } from "node:child_process";
 import { readFile, stat, writeFile, mkdir } from "node:fs/promises";
 import { cpus } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
+import process from "node:process";
+import { clearInterval, clearTimeout, setInterval, setTimeout } from "node:timers";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);

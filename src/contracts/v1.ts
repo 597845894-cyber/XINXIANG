@@ -2,7 +2,29 @@ export const CONTRACT_VERSION = 1 as const;
 
 export type AppRouteId = "inbox" | "quickImport" | "review" | "tasks" | "settings";
 
-export type CommandName = "getAppBootstrap" | "openQuickImport" | "quitApp";
+export type CommandName =
+  | "getAppBootstrap"
+  | "getModelResourceStatus"
+  | "installModelResources"
+  | "openQuickImport"
+  | "quitApp";
+
+export type ModelResourceState = "available" | "missing" | "corrupt";
+
+export interface ModelResourceIssueV1 {
+  resourceId: string;
+  path: string;
+  reason: string;
+}
+
+export interface ModelResourceStatusV1 {
+  schemaVersion: 1;
+  selectionId: string;
+  state: ModelResourceState;
+  issues: ModelResourceIssueV1[];
+  recoveryAction: string | null;
+  networkRequired: false;
+}
 
 export type EventName = "quickImportRequested" | "windowHiddenToTray";
 

@@ -30,7 +30,8 @@
     "active": true,
     "targets": ["nsis"],
     "resources": {
-      "resources/model-placeholder/*": "models/"
+      "resources/model-placeholder/*": "models/",
+      "resources/models/selected-models.lock.json": "model-manifests/selected-models.lock.json"
     }
   }
 }

@@ -13,9 +13,21 @@
       "license": "Apache-2.0",
       "licenseSource": "https://github.com/PaddlePaddle/PaddleOCR/blob/main/LICENSE",
       "files": [
-        {"path": "ocr/ch_PP-OCRv3_det_infer.onnx", "size": 2432880, "sha256": "3439588c030faea393a54515f51e983d8e155b19a2e8aba7891934c1cf0de526"},
-        {"path": "ocr/ch_PP-OCRv3_rec_infer.onnx", "size": 10690752, "sha256": "897a3ededb38fee0dae2c1ccee38241f37df202c9509e3abca02e9217c5ee615"},
-        {"path": "ocr/ch_ppocr_mobile_v2.0_cls_infer.onnx", "size": 585532, "sha256": "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c"}
+        {
+          "path": "ocr/ch_PP-OCRv3_det_infer.onnx",
+          "size": 2432880,
+          "sha256": "3439588c030faea393a54515f51e983d8e155b19a2e8aba7891934c1cf0de526"
+        },
+        {
+          "path": "ocr/ch_PP-OCRv3_rec_infer.onnx",
+          "size": 10690752,
+          "sha256": "897a3ededb38fee0dae2c1ccee38241f37df202c9509e3abca02e9217c5ee615"
+        },
+        {
+          "path": "ocr/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+          "size": 585532,
+          "sha256": "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c"
+        }
       ]
     },
     {
@@ -28,7 +40,11 @@
       "license": "Apache-2.0",
       "licenseSource": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/blob/main/LICENSE",
       "files": [
-        {"path": "semantic/qwen2.5-1.5b-instruct-q4_k_m.gguf", "size": 1117320736, "sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e"}
+        {
+          "path": "semantic/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+          "size": 1117320736,
+          "sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e"
+        }
       ]
     },
     {
@@ -40,7 +56,11 @@
       "license": "MIT",
       "licenseSource": "https://github.com/ggml-org/llama.cpp/blob/master/LICENSE",
       "files": [
-        {"path": "runtime/llama-b6392-bin-win-cpu-x64.zip", "size": 14936765, "sha256": "9a333e6d2217a6ced33693489e620d68f5574e2f12e0ae9329282f316787a1e4"}
+        {
+          "path": "runtime/llama-b6392-bin-win-cpu-x64.zip",
+          "size": 14936765,
+          "sha256": "9a333e6d2217a6ced33693489e620d68f5574e2f12e0ae9329282f316787a1e4"
+        }
       ]
     }
   ]

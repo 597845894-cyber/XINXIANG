@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import process from "node:process";
 
 function parseArguments(argv) {
   const jsonIndex = argv.indexOf("--json-output");

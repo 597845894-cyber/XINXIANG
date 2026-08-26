@@ -15,6 +15,8 @@ describe("application contract v1", () => {
       "tasks",
       "settings",
     ]);
+    expect(contract.commands).toContain("getModelResourceStatus");
+    expect(contract.commands).toContain("installModelResources");
   });
 
   it("rejects an incompatible contract version", () => {

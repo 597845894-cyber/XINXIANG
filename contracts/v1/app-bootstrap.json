@@ -8,6 +8,12 @@
     { "id": "tasks", "label": "任务表" },
     { "id": "settings", "label": "设置" }
   ],
-  "commands": ["getAppBootstrap", "openQuickImport", "quitApp"],
+  "commands": [
+    "getAppBootstrap",
+    "getModelResourceStatus",
+    "installModelResources",
+    "openQuickImport",
+    "quitApp"
+  ],
   "events": ["quickImportRequested", "windowHiddenToTray"]
 }

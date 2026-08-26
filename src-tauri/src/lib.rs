@@ -1,6 +1,10 @@
 mod contracts;
+mod model_resources;
 
 use contracts::AppBootstrapV1;
+use model_resources::{
+    inspect_resources, install_resources, install_root, selected_manifest, ModelResourceStatusV1,
+};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -26,6 +30,36 @@ fn open_quick_import(app: AppHandle) {
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn get_model_resource_status(app: AppHandle) -> Result<ModelResourceStatusV1, String> {
+    let manifest = selected_manifest()?;
+    let app_data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| "MODEL_RESOURCE_DIRECTORY_UNAVAILABLE".to_owned())?;
+    Ok(inspect_resources(
+        &install_root(&app_data_dir, &manifest.selection_id),
+        &manifest,
+    ))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn install_model_resources(
+    app: AppHandle,
+    source_directory: String,
+) -> Result<ModelResourceStatusV1, String> {
+    let manifest = selected_manifest()?;
+    let app_data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| "MODEL_RESOURCE_DIRECTORY_UNAVAILABLE".to_owned())?;
+    install_resources(
+        std::path::Path::new(&source_directory),
+        &install_root(&app_data_dir, &manifest.selection_id),
+        &manifest,
+    )
 }
 
 fn show_main_window(app: &AppHandle) {
@@ -96,6 +130,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_app_bootstrap,
+            get_model_resource_status,
+            install_model_resources,
             open_quick_import,
             quit_app
         ])

@@ -16,6 +16,8 @@ pub enum AppRouteId {
 #[serde(rename_all = "camelCase")]
 pub enum CommandName {
     GetAppBootstrap,
+    GetModelResourceStatus,
+    InstallModelResources,
     OpenQuickImport,
     QuitApp,
 }
@@ -73,6 +75,8 @@ impl AppBootstrapV1 {
             ],
             commands: vec![
                 CommandName::GetAppBootstrap,
+                CommandName::GetModelResourceStatus,
+                CommandName::InstallModelResources,
                 CommandName::OpenQuickImport,
                 CommandName::QuitApp,
             ],
