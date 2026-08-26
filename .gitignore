@@ -13,6 +13,7 @@ pnpm-debug.log*
 target/
 src-tauri/target/
 src-tauri/gen/schemas/
+.cargo-home/
 
 # Environment variables and secrets
 .env

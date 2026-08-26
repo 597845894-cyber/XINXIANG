@@ -1,0 +1,67 @@
+:root {
+  font-family:
+    Inter,
+    "Segoe UI",
+    "Microsoft YaHei UI",
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  color: #19221f;
+  background: #f3f5f4;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.startup-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.startup-panel {
+  width: min(560px, 100%);
+  padding: 32px;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 40px rgb(25 34 31 / 8%);
+}
+
+.startup-kicker {
+  margin: 0 0 8px;
+  color: #176b54;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.startup-panel h1 {
+  margin: 0;
+  font-size: 32px;
+  letter-spacing: 0;
+}
+
+.startup-panel p:last-child {
+  margin: 16px 0 0;
+  color: #5c6763;
+  line-height: 1.7;
+}

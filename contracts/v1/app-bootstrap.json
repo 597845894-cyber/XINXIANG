@@ -1,0 +1,13 @@
+{
+  "contractVersion": 1,
+  "appVersion": "0.1.0",
+  "routes": [
+    { "id": "inbox", "label": "收件箱" },
+    { "id": "quickImport", "label": "快速导入" },
+    { "id": "review", "label": "任务核对" },
+    { "id": "tasks", "label": "任务表" },
+    { "id": "settings", "label": "设置" }
+  ],
+  "commands": ["getAppBootstrap", "openQuickImport", "quitApp"],
+  "events": ["quickImportRequested", "windowHiddenToTray"]
+}

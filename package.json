@@ -1,0 +1,49 @@
+{
+  "name": "xinxiang-campus-notice-inbox",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:rust": "scripts\\cargo.cmd test --manifest-path src-tauri/Cargo.toml",
+    "lint:rust": "scripts\\cargo.cmd clippy --manifest-path src-tauri/Cargo.toml -- -D warnings",
+    "format:rust": "scripts\\cargo.cmd fmt --manifest-path src-tauri/Cargo.toml -- --check",
+    "check": "pnpm format:check && pnpm lint && pnpm test && pnpm format:rust && pnpm lint:rust && pnpm test:rust && pnpm build",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "lucide-react": "^0.544.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@tauri-apps/cli": "^2.11.4",
+    "@testing-library/jest-dom": "^6.9.0",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.1.0",
+    "eslint": "^9.39.0",
+    "eslint-plugin-react-hooks": "^7.0.0",
+    "jsdom": "^27.2.0",
+    "prettier": "^3.6.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
+  }
+}
