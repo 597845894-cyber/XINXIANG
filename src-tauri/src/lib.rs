@@ -8,6 +8,9 @@ use tauri::{
 };
 
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+#[cfg(test)]
+const PLACEHOLDER_MODEL_MANIFEST: &str =
+    include_str!("../resources/model-placeholder/manifest.json");
 
 #[tauri::command(rename_all = "camelCase")]
 fn get_app_bootstrap() -> AppBootstrapV1 {
@@ -102,7 +105,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_hide_to_tray, APP_VERSION};
+    use super::{should_hide_to_tray, APP_VERSION, PLACEHOLDER_MODEL_MANIFEST};
 
     #[test]
     fn app_version_is_semver_compatible() {
@@ -117,4 +120,13 @@ mod tests {
         assert!(!should_hide_to_tray("quick-import"));
     }
 
+    #[test]
+    fn placeholder_model_manifest_is_versioned_and_explicit() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(PLACEHOLDER_MODEL_MANIFEST).expect("placeholder manifest is JSON");
+
+        assert_eq!(manifest["schemaVersion"], 1);
+        assert_eq!(manifest["placeholder"], true);
+        assert_eq!(manifest["file"], "placeholder-model.txt");
+    }
 }

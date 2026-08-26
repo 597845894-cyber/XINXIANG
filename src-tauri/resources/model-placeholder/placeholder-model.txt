@@ -1,0 +1,4 @@
+XINXIANG_PLACEHOLDER_MODEL_V1
+
+This file only verifies local model resource packaging.
+It contains no inference weights and no user data.

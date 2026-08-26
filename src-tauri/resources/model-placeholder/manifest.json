@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "resourceId": "xinxiang.placeholder-model",
+  "version": "0.0.0-placeholder",
+  "file": "placeholder-model.txt",
+  "purpose": "Verify that a local model resource is installed with the desktop application.",
+  "placeholder": true
+}
