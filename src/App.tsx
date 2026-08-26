@@ -21,9 +21,10 @@ import {
   Sparkles,
   Upload,
 } from "lucide-react";
-import { useState, type ComponentType } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 
 import type { AppRouteId } from "./contracts/v1";
+import { isDesktopRuntime, quitDesktopApp } from "./platform/desktop";
 
 type NavItem = {
   id: AppRouteId;
@@ -422,7 +423,7 @@ function SettingsView() {
           <strong>彻底退出应用</strong>
           <p>退出后，任务提醒将在下次启动前暂停。</p>
         </div>
-        <button className="danger-button" type="button">
+        <button className="danger-button" onClick={() => void quitDesktopApp()} type="button">
           退出校园信箱
         </button>
       </div>
@@ -440,6 +441,19 @@ function ActiveView({ route }: { route: AppRouteId }) {
 
 export function App() {
   const [activeRoute, setActiveRoute] = useState<AppRouteId>("inbox");
+
+  useEffect(() => {
+    if (!isDesktopRuntime()) return;
+
+    let dispose: (() => void) | undefined;
+    void import("@tauri-apps/api/event").then(({ listen }) =>
+      listen("quickImportRequested", () => setActiveRoute("quickImport")).then((unlisten) => {
+        dispose = unlisten;
+      }),
+    );
+
+    return () => dispose?.();
+  }, []);
   return (
     <div className="app-shell">
       <aside className="sidebar">
