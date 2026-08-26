@@ -1,0 +1,57 @@
+# JavaScript / TypeScript
+node_modules/
+dist/
+coverage/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Rust / Tauri
+target/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# Local application data and private fixtures
+data/
+local-data/
+user-data/
+backups/
+test-data/private/
+fixtures/private/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.xinxiang-backup
+
+# Local model binaries
+models/
+*.gguf
+*.onnx
+*.ort
+*.safetensors
+
+# Temporary files and logs
+tmp/
+temp/
+*.log
+*.tmp
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
