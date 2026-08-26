@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "datasetId": "xinxiang-campus-notices-synthetic-v1",
+  "rankingRule": "JSON compliance, classification, task count, field F1, evidence grounding desc; latency asc",
+  "candidates": [
+    {
+      "candidateId": "qwen2.5-1.5b-instruct-q4_k_m",
+      "parameters": "1.5B",
+      "structuredOutputCompliance": 1,
+      "classificationAccuracy": 0.7,
+      "taskCountAccuracy": 0.8,
+      "fieldF1": 0.422258,
+      "evidenceGroundingRate": 0.9,
+      "meanElapsedMs": 13243.511,
+      "maxElapsedMs": 22142.218,
+      "peakMemoryMb": 1763.063,
+      "modelSizeMb": 1065.56,
+      "sampleCount": 10
+    },
+    {
+      "candidateId": "qwen2.5-3b-instruct-q4_k_m",
+      "parameters": "3B",
+      "structuredOutputCompliance": 1,
+      "classificationAccuracy": 0.7,
+      "taskCountAccuracy": 0.8,
+      "fieldF1": 0.375,
+      "evidenceGroundingRate": 0.9,
+      "meanElapsedMs": 36897.959,
+      "maxElapsedMs": 78877.062,
+      "peakMemoryMb": 3383.887,
+      "modelSizeMb": 2007.42,
+      "sampleCount": 10
+    }
+  ],
+  "recommendedCandidateId": "qwen2.5-1.5b-instruct-q4_k_m"
+}

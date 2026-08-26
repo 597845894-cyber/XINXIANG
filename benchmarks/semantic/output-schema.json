@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["category", "changeIntent", "tasks", "uncertainties"],
+  "properties": {
+    "category": {
+      "type": "string",
+      "enum": ["required-action", "schedule", "voluntary", "result-or-change", "information-only"]
+    },
+    "changeIntent": { "type": "string", "enum": ["none", "reschedule", "cancel"] },
+    "tasks": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "timeExpression",
+          "locationOrEntry",
+          "materials",
+          "audience",
+          "required",
+          "evidence"
+        ],
+        "properties": {
+          "title": { "type": "string" },
+          "timeExpression": { "type": ["string", "null"] },
+          "locationOrEntry": { "type": ["string", "null"] },
+          "materials": { "type": "array", "items": { "type": "string" } },
+          "audience": { "type": ["string", "null"] },
+          "required": { "type": ["boolean", "null"] },
+          "evidence": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "uncertainties": { "type": "array", "items": { "type": "string" } }
+  }
+}
