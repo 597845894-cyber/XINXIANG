@@ -128,7 +128,7 @@ async function main() {
       "--ctx-size",
       "4096",
       "--threads",
-      String(Math.min(cpus().length, 8)),
+      args["--threads"] ?? String(Math.min(cpus().length, 8)),
       "--predict",
       "768",
       "--temp",

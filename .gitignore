@@ -38,7 +38,7 @@ fixtures/private/
 *.xinxiang-backup
 
 # Local model binaries
-models/
+/models/
 benchmarks/models/
 benchmarks/cache/
 benchmarks/results/raw/

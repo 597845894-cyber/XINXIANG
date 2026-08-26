@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "selectionId": "xinxiang-model-selection-2026-08-26",
+  "datasetId": "xinxiang-campus-notices-synthetic-v1",
+  "environment": {
+    "executionBackend": "CPU-only",
+    "physicalHostMemoryGb": 15.7,
+    "targetMemoryBudgetMb": 8192,
+    "note": "Capacity is validated against the 8 GB budget from measured process peaks; physical 8 GB clean-device acceptance remains in OpenSpec task 9.4."
+  },
+  "coverage": {
+    "fullDatasetSamples": 10,
+    "imageOcrSamples": 2,
+    "structuredSemanticOutputs": 10
+  },
+  "selected": {
+    "ocrCandidateId": "rapidocr-ppocrv3-mobile",
+    "semanticCandidateId": "qwen2.5-1.5b-instruct-q4_k_m"
+  },
+  "performance": {
+    "ocrPeakMemoryMb": 261.148,
+    "semanticPeakMemoryMb": 1763.063,
+    "conservativeCombinedPeakMemoryMb": 2024.211,
+    "withinEightGbBudget": true,
+    "maxEventLoopDelayMs": 24.123,
+    "uiResponsivenessPassed": true
+  }
+}
