@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "datasetId": "xinxiang-campus-notices-synthetic-v1",
+  "metricDefinitions": {
+    "characterAccuracy": "1 - Levenshtein distance / reference characters after removing whitespace",
+    "coordinateValidity": "share of OCR lines containing four non-negative coordinate pairs",
+    "elapsedMs": "wall-clock inference time; model initialization is excluded",
+    "peakMemoryMb": "maximum process resident memory sampled every 10 ms, including model initialization",
+    "modelSizeMb": "sum of detector, recognizer, and direction classifier ONNX files"
+  },
+  "rankingRule": "character accuracy desc, coordinate validity desc, latency asc, model size asc",
+  "candidates": [
+    {
+      "candidateId": "rapidocr-ppocrv3-mobile",
+      "modelFamily": "PaddleOCR PP-OCRv3 mobile Chinese",
+      "adapterVersion": "1.2.3",
+      "meanCharacterAccuracy": 1.0,
+      "coordinateValidity": 1.0,
+      "meanElapsedMs": 789.451,
+      "maxElapsedMs": 821.484,
+      "peakMemoryMb": 261.148,
+      "modelSizeMb": 13.074,
+      "sampleCount": 2
+    },
+    {
+      "candidateId": "rapidocr-ppocrv4-mobile",
+      "modelFamily": "PaddleOCR PP-OCRv4 mobile Chinese",
+      "adapterVersion": "1.4.4",
+      "meanCharacterAccuracy": 1.0,
+      "coordinateValidity": 1.0,
+      "meanElapsedMs": 1035.494,
+      "maxElapsedMs": 1120.646,
+      "peakMemoryMb": 216.52,
+      "modelSizeMb": 15.439,
+      "sampleCount": 2
+    }
+  ],
+  "recommendedCandidateId": "rapidocr-ppocrv3-mobile"
+}

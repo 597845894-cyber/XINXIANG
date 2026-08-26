@@ -6,7 +6,7 @@
     "noticePublishedAt": "2026-09-02T10:20:00+08:00",
     "timezone": "Asia/Shanghai",
     "asset": "../images/clear-relative.png",
-    "referenceText": "班级通知\n请全体同学明天17:00前完成实验室安全考试。\n入口：校园安全学习平台"
+    "referenceText": "校园通知群（合成样本）\n所有姓名、时间与内容均为测试虚构\n班级通知\n请全体同学明天17:00前完成实验室安全考试。\n入口：校园安全学习平台"
   },
   "coverage": ["clear-screenshot", "relative-date"],
   "expected": {

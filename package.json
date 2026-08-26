@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "benchmark:ocr:summary": "python benchmarks/ocr/summarize.py benchmarks/results/raw/rapidocr-ppocrv3-mobile.json benchmarks/results/raw/rapidocr-ppocrv4-mobile.json --json-output benchmarks/results/ocr-summary.json --markdown-output docs/benchmarks/ocr-selection.md",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings 0",
     "format": "prettier --write .",

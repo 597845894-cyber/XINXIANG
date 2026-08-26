@@ -48,6 +48,8 @@ benchmarks/results/raw/
 *.safetensors
 
 # Temporary files and logs
+__pycache__/
+*.py[cod]
 tmp/
 temp/
 *.log
