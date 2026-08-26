@@ -11,7 +11,7 @@ $manifest = Join-Path $PSScriptRoot '..\src-tauri\Cargo.toml'
 
 if ($Action -eq 'Format') {
   $rustfmt = Join-Path $defaultBin 'rustfmt.exe'
-  $sources = Get-ChildItem (Join-Path $PSScriptRoot '..\src-tauri\src\*.rs') | ForEach-Object FullName
+  $sources = Get-ChildItem (Join-Path $PSScriptRoot '..\src-tauri\src') -Filter '*.rs' -Recurse | ForEach-Object FullName
   & $rustfmt --edition 2021 --check @sources
   exit $LASTEXITCODE
 }

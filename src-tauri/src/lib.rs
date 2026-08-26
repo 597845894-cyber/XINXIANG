@@ -1,5 +1,6 @@
 mod contracts;
 mod model_resources;
+pub mod security;
 
 use contracts::AppBootstrapV1;
 use model_resources::{
