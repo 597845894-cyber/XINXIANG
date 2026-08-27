@@ -132,31 +132,23 @@ fn run_reminder_scan(app: AppHandle) -> Result<usize, String> {
 }
 
 #[tauri::command(rename_all = "camelCase")]
-fn get_model_resource_status(app: AppHandle) -> Result<ModelResourceStatusV1, String> {
+fn get_model_resource_status(_app: AppHandle) -> Result<ModelResourceStatusV1, String> {
     let manifest = selected_manifest()?;
-    let app_data_dir = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|_| "MODEL_RESOURCE_DIRECTORY_UNAVAILABLE".to_owned())?;
     Ok(inspect_resources(
-        &install_root(&app_data_dir, &manifest.selection_id),
+        &install_root(&manifest.selection_id),
         &manifest,
     ))
 }
 
 #[tauri::command(rename_all = "camelCase")]
 fn install_model_resources(
-    app: AppHandle,
+    _app: AppHandle,
     source_directory: String,
 ) -> Result<ModelResourceStatusV1, String> {
     let manifest = selected_manifest()?;
-    let app_data_dir = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|_| "MODEL_RESOURCE_DIRECTORY_UNAVAILABLE".to_owned())?;
     install_resources(
         std::path::Path::new(&source_directory),
-        &install_root(&app_data_dir, &manifest.selection_id),
+        &install_root(&manifest.selection_id),
         &manifest,
     )
 }

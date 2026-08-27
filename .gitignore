@@ -40,6 +40,7 @@ fixtures/private/
 
 # Local model binaries
 /models/
+/local-models/
 benchmarks/models/
 benchmarks/cache/
 benchmarks/results/raw/

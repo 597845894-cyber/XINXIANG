@@ -222,15 +222,15 @@ pub fn install_resources(
     Ok(inspect_resources(target, manifest))
 }
 
-pub fn install_root(app_data_dir: &Path, selection_id: &str) -> PathBuf {
-    app_data_dir.join("model-resources").join(selection_id)
+pub fn install_root(selection_id: &str) -> PathBuf {
+    PathBuf::from(r"E:\University\校园信箱\local-models").join(selection_id)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        inspect_resources, install_resources, selected_manifest, ModelComponentV1, ModelFileV1,
-        ModelResourceState, ModelSelectionManifestV1,
+        inspect_resources, install_resources, install_root, selected_manifest, ModelComponentV1,
+        ModelFileV1, ModelResourceState, ModelSelectionManifestV1,
     };
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -318,5 +318,13 @@ mod tests {
         assert_eq!(status.state, ModelResourceState::Missing);
         assert!(status.recovery_action.unwrap().contains("不需要联网"));
         assert!(!status.network_required);
+    }
+
+    #[test]
+    fn uses_the_e_drive_local_model_directory() {
+        assert_eq!(
+            install_root("fixture-v1"),
+            std::path::PathBuf::from(r"E:\University\校园信箱\local-models").join("fixture-v1")
+        );
     }
 }

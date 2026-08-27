@@ -2,6 +2,16 @@
 
 首版模型资源由 `src-tauri/resources/models/selected-models.lock.json` 锁定。清单包含资源版本、许可证、相对路径、文件大小与 SHA-256；模型二进制不提交到 Git，也不得与通知样本、数据库或日志混放。
 
+当前开发安装固定使用 E 盘的 `E:\University\校园信箱\local-models\xinxiang-model-selection-2026-08-26`，避免占用 C 盘。该目录已由 `.gitignore` 排除；应用只会读取清单列出的本地文件，通知内容不会参与资源下载或校验。
+
+## 已核验的下载来源
+
+- OCR：PyPI 的 `rapidocr-onnxruntime` 1.2.3 资源包，包内的三个 PP-OCRv3 ONNX 文件。
+- 语义模型：[Qwen/Qwen2.5-1.5B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF) 的 `qwen2.5-1.5b-instruct-q4_k_m.gguf`。
+- 本地运行时：[llama.cpp b6392 Windows CPU x64 发布包](https://github.com/ggml-org/llama.cpp/releases/tag/b6392)。
+
+下载完成后必须按锁定清单检查文件长度和 SHA-256。2026-08-27 的本地核验中，五个文件均与清单匹配；模型和运行时没有被提交到仓库。
+
 ## 离线资源包结构
 
 用户选择的本地文件夹必须包含以下结构：
