@@ -175,6 +175,16 @@ pub struct TaskRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReminderRecord {
+    pub id: String,
+    pub task_id: String,
+    pub scheduled_at: String,
+    pub reminder_state: String,
+    pub idempotency_key: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoticeRelationRecord {
     pub id: String,
     pub notice_id: String,
@@ -621,8 +631,114 @@ impl<'connection> NoticeRepository<'connection> {
         let revision_number: i64 = transaction.query_row("SELECT COALESCE(MAX(revision_number), 0) + 1 FROM task_revisions WHERE task_id = ?1", [task_id], |row| row.get(0)).map_err(|_| RepositoryError::Database)?;
         transaction.execute("INSERT INTO task_revisions (id, task_id, revision_number, payload, created_at) VALUES (?1, ?2, ?3, ?4, datetime('now'))", params![revision_id, task_id, revision_number, payload]).map_err(|_| RepositoryError::Database)?;
         transaction.execute("UPDATE tasks SET task_state = ?2, current_revision_id = ?3, updated_at = datetime('now') WHERE id = ?1", params![task_id, state.as_db(), revision_id]).map_err(|_| RepositoryError::Database)?;
+        if matches!(state, TaskState::Completed | TaskState::Cancelled) {
+            transaction
+                .execute(
+                    "UPDATE reminders SET reminder_state = 'cancelled' WHERE task_id = ?1 AND reminder_state = 'pending' AND scheduled_at > datetime('now')",
+                    [task_id],
+                )
+                .map_err(|_| RepositoryError::Database)?;
+        }
         insert_audit(&transaction, "task", task_id, state.as_db(), Some(payload))?;
         transaction.commit().map_err(|_| RepositoryError::Database)
+    }
+
+    pub fn list_reminders(
+        &self,
+        task_id: Option<&str>,
+    ) -> Result<Vec<ReminderRecord>, RepositoryError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT id, task_id, scheduled_at, reminder_state, idempotency_key, created_at
+             FROM reminders WHERE (?1 IS NULL OR task_id = ?1) ORDER BY scheduled_at ASC",
+            )
+            .map_err(|_| RepositoryError::Database)?;
+        let rows = statement
+            .query_map([task_id], |row| {
+                Ok(ReminderRecord {
+                    id: row.get(0)?,
+                    task_id: row.get(1)?,
+                    scheduled_at: row.get(2)?,
+                    reminder_state: row.get(3)?,
+                    idempotency_key: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            })
+            .map_err(|_| RepositoryError::Database)?;
+        rows.map(|row| row.map_err(|_| RepositoryError::Database))
+            .collect()
+    }
+
+    pub fn upsert_reminder(&self, reminder: &ReminderRecord) -> Result<(), RepositoryError> {
+        let task_state: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT task_state FROM tasks WHERE id = ?1",
+                [reminder.task_id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| RepositoryError::Database)?;
+        if task_state.as_deref() != Some(TaskState::Todo.as_db()) {
+            return Err(RepositoryError::MissingTask);
+        }
+        self.connection.execute(
+            "INSERT INTO reminders (id, task_id, scheduled_at, reminder_state, idempotency_key, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
+             ON CONFLICT(idempotency_key) DO UPDATE SET scheduled_at = excluded.scheduled_at, reminder_state = excluded.reminder_state",
+            params![reminder.id, reminder.task_id, reminder.scheduled_at, reminder.reminder_state, reminder.idempotency_key],
+        ).map_err(|_| RepositoryError::Database)?;
+        Ok(())
+    }
+
+    pub fn delete_reminder(&self, reminder_id: &str) -> Result<(), RepositoryError> {
+        let changed = self
+            .connection
+            .execute("DELETE FROM reminders WHERE id = ?1", [reminder_id])
+            .map_err(|_| RepositoryError::Database)?;
+        if changed == 0 {
+            return Err(RepositoryError::InvalidState);
+        }
+        Ok(())
+    }
+
+    pub fn claim_due_reminders(&self) -> Result<Vec<ReminderRecord>, RepositoryError> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|_| RepositoryError::Database)?;
+        let mut statement = transaction.prepare(
+            "SELECT reminder.id, reminder.task_id, reminder.scheduled_at, reminder.reminder_state,
+                    reminder.idempotency_key, reminder.created_at
+             FROM reminders reminder INNER JOIN tasks task ON task.id = reminder.task_id
+             WHERE reminder.reminder_state = 'pending' AND datetime(replace(reminder.scheduled_at, 'T', ' ')) <= datetime('now') AND task.task_state = 'todo'
+             ORDER BY reminder.scheduled_at ASC",
+        ).map_err(|_| RepositoryError::Database)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(ReminderRecord {
+                    id: row.get(0)?,
+                    task_id: row.get(1)?,
+                    scheduled_at: row.get(2)?,
+                    reminder_state: row.get(3)?,
+                    idempotency_key: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            })
+            .map_err(|_| RepositoryError::Database)?;
+        let reminders = rows
+            .map(|row| row.map_err(|_| RepositoryError::Database))
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
+        transaction.execute(
+            "UPDATE reminders SET reminder_state = 'triggered' WHERE reminder_state = 'pending' AND datetime(replace(scheduled_at, 'T', ' ')) <= datetime('now') AND task_id IN (SELECT id FROM tasks WHERE task_state = 'todo')",
+            [],
+        ).map_err(|_| RepositoryError::Database)?;
+        transaction
+            .commit()
+            .map_err(|_| RepositoryError::Database)?;
+        Ok(reminders)
     }
 
     pub fn create_manual_task(
@@ -1022,7 +1138,9 @@ fn candidate_for_confirmation(
 
 #[cfg(test)]
 mod tests {
-    use super::{NewCandidate, NoticeRepository, NoticeState, RepositoryError};
+    use super::{
+        NewCandidate, NoticeRepository, NoticeState, ReminderRecord, RepositoryError, TaskState,
+    };
     use crate::{security::key_protection::MasterKey, storage::database::EncryptedDatabase};
     use tempfile::tempdir;
 
@@ -1185,6 +1303,47 @@ mod tests {
         assert_eq!(information_only.len(), 1);
         assert_eq!(detail.original_text.as_deref(), Some("同一条通知"));
         assert_eq!(detail.summary.published_time_source, "importTimeTentative");
+    }
+
+    #[test]
+    fn task_completion_cancels_future_reminders_transactionally_and_keys_are_idempotent() {
+        let database = database();
+        let repository = NoticeRepository::new(database.connection());
+        repository
+            .create_manual_task("task-reminder", "revision-reminder", b"{}")
+            .unwrap();
+        let reminder = ReminderRecord {
+            id: "reminder-1".to_owned(),
+            task_id: "task-reminder".to_owned(),
+            scheduled_at: "2999-01-01T00:00:00Z".to_owned(),
+            reminder_state: "pending".to_owned(),
+            idempotency_key: "task-reminder:deadline".to_owned(),
+            created_at: String::new(),
+        };
+        repository.upsert_reminder(&reminder).unwrap();
+        let duplicate = ReminderRecord {
+            id: "reminder-duplicate".to_owned(),
+            scheduled_at: "2999-01-02T00:00:00Z".to_owned(),
+            ..reminder.clone()
+        };
+        repository.upsert_reminder(&duplicate).unwrap();
+        assert_eq!(
+            repository
+                .list_reminders(Some("task-reminder"))
+                .unwrap()
+                .len(),
+            1
+        );
+        repository
+            .transition_task(
+                "task-reminder",
+                TaskState::Completed,
+                b"{}",
+                "revision-reminder-2",
+            )
+            .unwrap();
+        let state: String = database.connection().query_row("SELECT reminder_state FROM reminders WHERE idempotency_key = 'task-reminder:deadline'", [], |row| row.get(0)).unwrap();
+        assert_eq!(state, "cancelled");
     }
 
     #[test]

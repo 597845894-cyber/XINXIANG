@@ -44,6 +44,10 @@ pub enum CommandName {
     ResolveNoticeRelation,
     OpenQuickImport,
     QuitApp,
+    ListReminders,
+    UpsertReminder,
+    DeleteReminder,
+    RunReminderScan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +58,7 @@ pub enum EventName {
     RelativeDateRecalculationRequested,
     AnalysisProgress,
     AnalysisCompleted,
+    ReminderTriggered,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,6 +170,26 @@ pub struct TaskViewV1 {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderViewV1 {
+    pub id: String,
+    pub task_id: String,
+    pub scheduled_at: String,
+    pub reminder_state: String,
+    pub idempotency_key: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationEventV1 {
+    pub reminder_id: String,
+    pub task_id: String,
+    pub scheduled_at: String,
+    pub missed_count: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoticeRelationViewV1 {
@@ -247,6 +272,10 @@ impl AppBootstrapV1 {
                 CommandName::ResolveNoticeRelation,
                 CommandName::OpenQuickImport,
                 CommandName::QuitApp,
+                CommandName::ListReminders,
+                CommandName::UpsertReminder,
+                CommandName::DeleteReminder,
+                CommandName::RunReminderScan,
             ],
             events: vec![
                 EventName::QuickImportRequested,
@@ -254,6 +283,7 @@ impl AppBootstrapV1 {
                 EventName::RelativeDateRecalculationRequested,
                 EventName::AnalysisProgress,
                 EventName::AnalysisCompleted,
+                EventName::ReminderTriggered,
             ],
         }
     }

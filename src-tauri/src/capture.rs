@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::{
     contracts::{
         CandidateViewV1, ImagePreviewV1, NoticeDetailV1, NoticeRelationViewV1, NoticeStateV1,
-        NoticeSummaryV1, SourceAssetInfoV1, TaskViewV1,
+        NoticeSummaryV1, ReminderViewV1, SourceAssetInfoV1, TaskViewV1,
     },
     security::key_protection::{DpapiCurrentUserProtector, MasterKeyManager},
     storage::{
@@ -14,7 +14,8 @@ use crate::{
         database::EncryptedDatabase,
         repository::{
             CandidateState, NewCandidate, NoticeDetail, NoticeRelationRecord, NoticeRepository,
-            NoticeState, NoticeSummary, PublishedTimeCandidate, SourceAsset, TaskState,
+            NoticeState, NoticeSummary, PublishedTimeCandidate, ReminderRecord, SourceAsset,
+            TaskState,
         },
     },
 };
@@ -410,6 +411,61 @@ pub fn set_task_state(
         .map_err(map_repository_error)
 }
 
+pub fn list_reminders(
+    app_data_directory: &Path,
+    task_id: Option<&str>,
+) -> Result<Vec<ReminderViewV1>, CaptureError> {
+    let database = open_database(app_data_directory)?;
+    NoticeRepository::new(database.connection())
+        .list_reminders(task_id)
+        .map_err(map_repository_error)
+        .map(|rows| rows.into_iter().map(reminder_to_contract).collect())
+}
+
+pub fn upsert_reminder(
+    app_data_directory: &Path,
+    task_id: &str,
+    reminder_id: String,
+    scheduled_at: String,
+    idempotency_key: String,
+) -> Result<ReminderViewV1, CaptureError> {
+    validate_published_time(&scheduled_at)?;
+    let record = ReminderRecord {
+        id: reminder_id,
+        task_id: task_id.to_owned(),
+        scheduled_at,
+        reminder_state: "pending".to_owned(),
+        idempotency_key,
+        created_at: String::new(),
+    };
+    let database = open_database(app_data_directory)?;
+    let repository = NoticeRepository::new(database.connection());
+    repository
+        .upsert_reminder(&record)
+        .map_err(map_repository_error)?;
+    repository
+        .list_reminders(Some(task_id))
+        .map_err(map_repository_error)?
+        .into_iter()
+        .find(|item| item.id == record.id || item.idempotency_key == record.idempotency_key)
+        .map(reminder_to_contract)
+        .ok_or(CaptureError::Storage)
+}
+
+pub fn delete_reminder(app_data_directory: &Path, reminder_id: &str) -> Result<(), CaptureError> {
+    let database = open_database(app_data_directory)?;
+    NoticeRepository::new(database.connection())
+        .delete_reminder(reminder_id)
+        .map_err(map_repository_error)
+}
+
+pub fn claim_due_reminders(app_data_directory: &Path) -> Result<Vec<ReminderRecord>, CaptureError> {
+    let database = open_database(app_data_directory)?;
+    NoticeRepository::new(database.connection())
+        .claim_due_reminders()
+        .map_err(map_repository_error)
+}
+
 pub fn task_history(
     app_data_directory: &Path,
     task_id: &str,
@@ -532,6 +588,17 @@ fn task_to_contract(task: crate::storage::repository::TaskRecord) -> Option<Task
         created_at: task.created_at,
         updated_at: task.updated_at,
     })
+}
+
+fn reminder_to_contract(reminder: ReminderRecord) -> ReminderViewV1 {
+    ReminderViewV1 {
+        id: reminder.id,
+        task_id: reminder.task_id,
+        scheduled_at: reminder.scheduled_at,
+        reminder_state: reminder.reminder_state,
+        idempotency_key: reminder.idempotency_key,
+        created_at: reminder.created_at,
+    }
 }
 
 fn relation_to_contract(relation: NoticeRelationRecord) -> Option<NoticeRelationViewV1> {

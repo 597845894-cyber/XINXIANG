@@ -37,13 +37,18 @@
     "listNoticeRelations",
     "resolveNoticeRelation",
     "openQuickImport",
-    "quitApp"
+    "quitApp",
+    "listReminders",
+    "upsertReminder",
+    "deleteReminder",
+    "runReminderScan"
   ],
   "events": [
     "quickImportRequested",
     "windowHiddenToTray",
     "relativeDateRecalculationRequested",
     "analysisProgress",
-    "analysisCompleted"
+    "analysisCompleted",
+    "reminderTriggered"
   ]
 }

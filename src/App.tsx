@@ -29,6 +29,7 @@ import type {
   NoticeSummaryV1,
   TaskCandidatePayloadV1,
   TaskViewV1,
+  NotificationEventV1,
 } from "./contracts/v1";
 import {
   getNoticeDetail,
@@ -56,6 +57,9 @@ import {
   resolveNoticeRelation,
   updateTask,
   updateNoticePublishedTime,
+  listReminders,
+  upsertReminder,
+  deleteReminder,
 } from "./platform/desktop";
 
 type NavItem = {
@@ -120,7 +124,15 @@ function toPublishedTime(value: string) {
   return Number.isNaN(date.valueOf()) ? "" : date.toISOString();
 }
 
-function AppHeader({ activeRoute }: { activeRoute: AppRouteId }) {
+function AppHeader({
+  activeRoute,
+  onNotifications,
+  notificationCount,
+}: {
+  activeRoute: AppRouteId;
+  onNotifications: () => void;
+  notificationCount: number;
+}) {
   const titles: Record<AppRouteId, string> = {
     inbox: "收件箱",
     quickImport: "快速导入",
@@ -140,9 +152,15 @@ function AppHeader({ activeRoute }: { activeRoute: AppRouteId }) {
           <span className="sr-only">搜索通知和任务</span>
           <input type="search" placeholder="搜索通知和任务" />
         </label>
-        <button className="icon-button" type="button" title="通知中心" aria-label="通知中心">
+        <button
+          className="icon-button"
+          type="button"
+          title="通知中心"
+          aria-label="通知中心"
+          onClick={onNotifications}
+        >
           <Bell size={19} />
-          <span className="notification-dot" />
+          {notificationCount > 0 ? <span className="notification-dot" /> : null}
         </button>
       </div>
     </header>
@@ -1262,6 +1280,24 @@ function TasksView() {
     }
   }
 
+  async function manageReminder(task: TaskViewV1) {
+    try {
+      const current = await listReminders(task.id);
+      if (current?.length) {
+        await deleteReminder(current[0].id);
+        setMessage("已删除一条任务提醒。");
+        return;
+      }
+      const raw = window.prompt("输入提醒时间（例如 2026-08-27T18:30）");
+      if (!raw) return;
+      const scheduledAt = new Date(raw).toISOString();
+      await upsertReminder(task.id, scheduledAt, `${task.id}:${scheduledAt}`);
+      setMessage("提醒已保存到本机。");
+    } catch {
+      setMessage("提醒未能保存，请确认时间和任务状态。");
+    }
+  }
+
   return (
     <section className="content-page" aria-labelledby="tasks-title">
       <div className="page-intro inline-intro">
@@ -1365,6 +1401,13 @@ function TasksView() {
                         >
                           取消
                         </button>
+                        <button
+                          className="status-label neutral"
+                          onClick={() => void manageReminder(task)}
+                          type="button"
+                        >
+                          提醒
+                        </button>
                       </>
                     ) : null}
                   </div>
@@ -1385,6 +1428,22 @@ function SettingsView() {
   const [securityStatus, setSecurityStatus] = useState<"idle" | "checking" | "verified" | "failed">(
     "idle",
   );
+  const [remindersEnabled, setRemindersEnabled] = useState(
+    () => localStorage.getItem("remindersEnabled") !== "false",
+  );
+  const [launchAtLogin, setLaunchAtLogin] = useState(
+    () => localStorage.getItem("launchAtLogin") === "true",
+  );
+
+  function toggleReminders(enabled: boolean) {
+    setRemindersEnabled(enabled);
+    localStorage.setItem("remindersEnabled", String(enabled));
+  }
+
+  function toggleLaunchAtLogin(enabled: boolean) {
+    setLaunchAtLogin(enabled);
+    localStorage.setItem("launchAtLogin", String(enabled));
+  }
 
   async function runSecurityCheck() {
     if (!isDesktopRuntime()) return;
@@ -1413,7 +1472,11 @@ function SettingsView() {
             <p>关闭主窗口后，校园信箱继续在系统托盘运行并按时提醒。</p>
           </div>
           <label className="switch">
-            <input type="checkbox" defaultChecked />
+            <input
+              type="checkbox"
+              checked={launchAtLogin}
+              onChange={(event) => toggleLaunchAtLogin(event.target.checked)}
+            />
             <span />
           </label>
         </section>
@@ -1426,7 +1489,11 @@ function SettingsView() {
             <p>任务提醒通过 Windows 通知和应用内通知中心显示。</p>
           </div>
           <label className="switch">
-            <input type="checkbox" defaultChecked />
+            <input
+              type="checkbox"
+              checked={remindersEnabled}
+              onChange={(event) => toggleReminders(event.target.checked)}
+            />
             <span />
           </label>
         </section>
@@ -1466,6 +1533,11 @@ function SettingsView() {
           </button>
         </section>
       </div>
+      <p className="form-message">
+        {remindersEnabled
+          ? "提醒权限：已启用；若 Windows 拒绝系统通知，应用内通知中心仍会保留记录。"
+          : "提醒已关闭，后台不会产生新的提醒通知。"}
+      </p>
       <div className="quit-panel">
         <div>
           <strong>彻底退出应用</strong>
@@ -1497,16 +1569,26 @@ function ActiveView({
 
 export function App() {
   const [activeRoute, setActiveRoute] = useState<AppRouteId>("inbox");
+  const [notifications, setNotifications] = useState<NotificationEventV1[]>([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   useEffect(() => {
     if (!isDesktopRuntime()) return;
 
     let dispose: (() => void) | undefined;
-    void import("@tauri-apps/api/event").then(({ listen }) =>
-      listen("quickImportRequested", () => setActiveRoute("quickImport")).then((unlisten) => {
-        dispose = unlisten;
-      }),
-    );
+    void import("@tauri-apps/api/event").then(async ({ listen }) => {
+      const stopQuickImport = await listen("quickImportRequested", () =>
+        setActiveRoute("quickImport"),
+      );
+      const stopReminder = await listen<NotificationEventV1>("reminderTriggered", (event) => {
+        if (localStorage.getItem("remindersEnabled") === "false") return;
+        setNotifications((current) => [event.payload, ...current].slice(0, 50));
+      });
+      dispose = () => {
+        stopQuickImport();
+        stopReminder();
+      };
+    });
 
     return () => dispose?.();
   }, []);
@@ -1545,7 +1627,54 @@ export function App() {
         </div>
       </aside>
       <main className="main-area">
-        <AppHeader activeRoute={activeRoute} />
+        <AppHeader
+          activeRoute={activeRoute}
+          onNotifications={() => setNotificationsOpen((open) => !open)}
+          notificationCount={notifications.length}
+        />
+        {notificationsOpen ? (
+          <aside className="notification-center" aria-label="通知中心">
+            <div className="notification-center-header">
+              <strong>本地提醒</strong>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="关闭通知中心"
+                title="关闭"
+                onClick={() => setNotificationsOpen(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {notifications.length ? (
+              notifications.map((item) => (
+                <button
+                  className="notification-item"
+                  type="button"
+                  key={`${item.reminderId}-${item.scheduledAt}`}
+                  onClick={() => {
+                    setActiveRoute("tasks");
+                    setNotificationsOpen(false);
+                  }}
+                >
+                  <Bell size={15} />
+                  <span>有 {item.missedCount} 条任务提醒需要查看</span>
+                </button>
+              ))
+            ) : (
+              <p className="empty-notice">暂无提醒</p>
+            )}
+            {notifications.length ? (
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setNotifications([])}
+              >
+                清空已读提醒
+              </button>
+            ) : null}
+          </aside>
+        ) : null}
         <ActiveView
           route={activeRoute}
           imported={() => setActiveRoute("inbox")}

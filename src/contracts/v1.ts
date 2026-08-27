@@ -31,7 +31,11 @@ export type CommandName =
   | "listNoticeRelations"
   | "resolveNoticeRelation"
   | "openQuickImport"
-  | "quitApp";
+  | "quitApp"
+  | "listReminders"
+  | "upsertReminder"
+  | "deleteReminder"
+  | "runReminderScan";
 
 export type ModelResourceState = "available" | "missing" | "corrupt";
 
@@ -64,7 +68,8 @@ export type EventName =
   | "windowHiddenToTray"
   | "relativeDateRecalculationRequested"
   | "analysisProgress"
-  | "analysisCompleted";
+  | "analysisCompleted"
+  | "reminderTriggered";
 
 export interface OcrPointV1 {
   x: number;
@@ -143,6 +148,22 @@ export interface TaskViewV1 {
   payload: TaskCandidatePayloadV1;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ReminderViewV1 {
+  id: string;
+  taskId: string;
+  scheduledAt: string;
+  reminderState: "pending" | "triggered" | "cancelled";
+  idempotencyKey: string;
+  createdAt: string;
+}
+
+export interface NotificationEventV1 {
+  reminderId: string;
+  taskId: string;
+  scheduledAt: string;
+  missedCount: number;
 }
 
 export interface NoticeRelationViewV1 {

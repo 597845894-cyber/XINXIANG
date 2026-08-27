@@ -12,6 +12,7 @@ import type {
   TaskViewV1,
   NoticeRelationViewV1,
   TaskCandidatePayloadV1,
+  ReminderViewV1,
 } from "../contracts/v1";
 
 declare global {
@@ -165,6 +166,36 @@ export async function setTaskState(
 ) {
   if (!isDesktopRuntime()) return;
   await invoke("set_task_state", { taskId, state, payload });
+}
+
+export async function listReminders(taskId?: string): Promise<ReminderViewV1[] | null> {
+  if (!isDesktopRuntime()) return null;
+  return invoke<ReminderViewV1[]>("list_reminders", { taskId: taskId ?? null });
+}
+
+export async function upsertReminder(
+  taskId: string,
+  scheduledAt: string,
+  idempotencyKey: string,
+  reminderId?: string,
+): Promise<ReminderViewV1 | null> {
+  if (!isDesktopRuntime()) return null;
+  return invoke<ReminderViewV1>("upsert_reminder", {
+    taskId,
+    reminderId: reminderId ?? crypto.randomUUID(),
+    scheduledAt,
+    idempotencyKey,
+  });
+}
+
+export async function deleteReminder(reminderId: string) {
+  if (!isDesktopRuntime()) return;
+  await invoke("delete_reminder", { reminderId });
+}
+
+export async function runReminderScan(): Promise<number> {
+  if (!isDesktopRuntime()) return 0;
+  return invoke<number>("run_reminder_scan");
 }
 
 export async function getTaskHistory(taskId: string): Promise<TaskCandidatePayloadV1[] | null> {

@@ -8,7 +8,8 @@ mod understanding;
 
 use contracts::{
     AnalysisProgressV1, AppBootstrapV1, CandidateViewV1, ImagePreviewV1, NoticeDetailV1,
-    NoticeRelationViewV1, NoticeStateV1, NoticeSummaryV1, SecurityStatusV1, TaskViewV1,
+    NoticeRelationViewV1, NoticeStateV1, NoticeSummaryV1, NotificationEventV1, ReminderViewV1,
+    SecurityStatusV1, TaskViewV1,
 };
 use model_resources::{
     inspect_resources, install_resources, install_root, selected_manifest, ModelResourceStatusV1,
@@ -67,6 +68,66 @@ fn open_quick_import(app: AppHandle) {
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn list_reminders(app: AppHandle, task_id: Option<String>) -> Result<Vec<ReminderViewV1>, String> {
+    capture::list_reminders(&capture_data_directory(&app)?, task_id.as_deref())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn upsert_reminder(
+    app: AppHandle,
+    task_id: String,
+    reminder_id: String,
+    scheduled_at: String,
+    idempotency_key: String,
+) -> Result<ReminderViewV1, String> {
+    capture::upsert_reminder(
+        &capture_data_directory(&app)?,
+        &task_id,
+        reminder_id,
+        scheduled_at,
+        idempotency_key,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn delete_reminder(app: AppHandle, reminder_id: String) -> Result<(), String> {
+    capture::delete_reminder(&capture_data_directory(&app)?, &reminder_id)
+        .map_err(|error| error.to_string())
+}
+
+fn scan_and_emit_reminders(app: &AppHandle) -> Result<usize, String> {
+    let reminders = capture::claim_due_reminders(&capture_data_directory(app)?)
+        .map_err(|error| error.to_string())?;
+    let mut grouped: std::collections::BTreeMap<String, (String, String, u32)> =
+        std::collections::BTreeMap::new();
+    for reminder in &reminders {
+        let entry = grouped
+            .entry(reminder.task_id.clone())
+            .or_insert_with(|| (reminder.id.clone(), reminder.scheduled_at.clone(), 0));
+        entry.2 += 1;
+    }
+    for (task_id, (reminder_id, scheduled_at, missed_count)) in grouped {
+        let _ = app.emit(
+            "reminderTriggered",
+            NotificationEventV1 {
+                reminder_id,
+                task_id,
+                scheduled_at,
+                missed_count,
+            },
+        );
+    }
+    Ok(reminders.len())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn run_reminder_scan(app: AppHandle) -> Result<usize, String> {
+    scan_and_emit_reminders(&app)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -440,6 +501,11 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             configure_tray(app)?;
+            let handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                let _ = scan_and_emit_reminders(&handle);
+                std::thread::sleep(std::time::Duration::from_secs(15));
+            });
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -480,7 +546,11 @@ pub fn run() {
             list_notice_relations,
             resolve_notice_relation,
             open_quick_import,
-            quit_app
+            quit_app,
+            list_reminders,
+            upsert_reminder,
+            delete_reminder,
+            run_reminder_scan
         ])
         .run(tauri::generate_context!())
         .expect("failed to run campus notice inbox");

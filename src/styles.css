@@ -226,6 +226,43 @@ button {
   border-radius: 50%;
   background: #cf4f45;
 }
+.notification-center {
+  position: absolute;
+  z-index: 10;
+  top: 64px;
+  right: 28px;
+  display: flex;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(520px, calc(100vh - 90px));
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid #d9dfdc;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 14px 36px rgb(35 52 44 / 16%);
+}
+.notification-center-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.notification-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid #e1e7e3;
+  border-radius: 5px;
+  color: #26332d;
+  background: #f8faf9;
+  text-align: left;
+  cursor: pointer;
+}
+.notification-item:hover {
+  background: #eef4f0;
+}
 
 .inbox-view {
   display: grid;
