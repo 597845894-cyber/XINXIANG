@@ -4,7 +4,7 @@ use rusqlite::{Connection, OpenFlags};
 
 use crate::security::key_protection::MasterKey;
 
-const CURRENT_SCHEMA_VERSION: i64 = 3;
+const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 #[derive(Debug)]
 pub enum DatabaseError {
@@ -116,6 +116,8 @@ fn apply_migrations(connection: &Connection) -> Result<(), DatabaseError> {
             1 => create_initial_schema(&transaction)?,
             2 => create_schema_indexes(&transaction)?,
             3 => add_attachment_content_nonce(&transaction)?,
+            4 => add_notice_capture_fields(&transaction)?,
+            5 => add_published_time_candidates(&transaction)?,
             _ => return Err(DatabaseError::Migration),
         }
         transaction
@@ -229,6 +231,30 @@ fn add_attachment_content_nonce(
         .map_err(|_| DatabaseError::Migration)
 }
 
+fn add_notice_capture_fields(transaction: &rusqlite::Transaction<'_>) -> Result<(), DatabaseError> {
+    transaction
+        .execute_batch(
+            "ALTER TABLE notices ADD COLUMN original_text BLOB;
+             ALTER TABLE notices ADD COLUMN published_time_source TEXT NOT NULL DEFAULT 'importTimeTentative';
+             ALTER TABLE source_assets ADD COLUMN byte_size INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE source_assets ADD COLUMN pixel_width INTEGER;
+             ALTER TABLE source_assets ADD COLUMN pixel_height INTEGER;
+             CREATE INDEX notices_by_state_updated ON notices(inbox_state, updated_at DESC);",
+        )
+        .map_err(|_| DatabaseError::Migration)
+}
+
+fn add_published_time_candidates(
+    transaction: &rusqlite::Transaction<'_>,
+) -> Result<(), DatabaseError> {
+    transaction
+        .execute_batch(
+            "ALTER TABLE notices ADD COLUMN published_time_candidate TEXT;
+             ALTER TABLE notices ADD COLUMN published_time_candidate_source TEXT;",
+        )
+        .map_err(|_| DatabaseError::Migration)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -313,5 +339,23 @@ mod tests {
             )
             .unwrap();
         assert_eq!(attachment_nonce_columns, 2);
+        let capture_columns: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notices')
+                 WHERE name IN ('original_text', 'published_time_source')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(capture_columns, 2);
+        let candidate_columns: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notices')
+                 WHERE name IN ('published_time_candidate', 'published_time_candidate_source')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(candidate_columns, 2);
     }
 }

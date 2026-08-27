@@ -19,6 +19,13 @@ pub enum CommandName {
     GetSecurityStatus,
     GetModelResourceStatus,
     InstallModelResources,
+    ImportTextNotice,
+    ImportImageNotice,
+    ListNotices,
+    GetNoticeDetail,
+    GetNoticeImagePreview,
+    UpdateNoticePublishedTime,
+    SetNoticeState,
     OpenQuickImport,
     QuitApp,
 }
@@ -28,6 +35,7 @@ pub enum CommandName {
 pub enum EventName {
     QuickImportRequested,
     WindowHiddenToTray,
+    RelativeDateRecalculationRequested,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,6 +64,57 @@ pub struct SecurityStatusV1 {
     pub attachments: String,
     pub business_networking: String,
     pub updater: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NoticeStateV1 {
+    PendingAnalysis,
+    PendingReview,
+    PartiallyProcessed,
+    Processed,
+    InformationOnly,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoticeSummaryV1 {
+    pub id: String,
+    pub source_kind: String,
+    pub inbox_state: NoticeStateV1,
+    pub published_at: String,
+    pub published_time_source: String,
+    pub published_time_candidate: Option<String>,
+    pub published_time_candidate_source: Option<String>,
+    pub created_at: String,
+    pub excerpt: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceAssetInfoV1 {
+    pub id: String,
+    pub media_type: String,
+    pub byte_size: usize,
+    pub pixel_width: Option<u32>,
+    pub pixel_height: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoticeDetailV1 {
+    #[serde(flatten)]
+    pub summary: NoticeSummaryV1,
+    pub original_text: Option<String>,
+    pub source_asset: Option<SourceAssetInfoV1>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImagePreviewV1 {
+    pub media_type: String,
+    pub bytes: Vec<u8>,
 }
 
 impl SecurityStatusV1 {
@@ -103,12 +162,20 @@ impl AppBootstrapV1 {
                 CommandName::GetSecurityStatus,
                 CommandName::GetModelResourceStatus,
                 CommandName::InstallModelResources,
+                CommandName::ImportTextNotice,
+                CommandName::ImportImageNotice,
+                CommandName::ListNotices,
+                CommandName::GetNoticeDetail,
+                CommandName::GetNoticeImagePreview,
+                CommandName::UpdateNoticePublishedTime,
+                CommandName::SetNoticeState,
                 CommandName::OpenQuickImport,
                 CommandName::QuitApp,
             ],
             events: vec![
                 EventName::QuickImportRequested,
                 EventName::WindowHiddenToTray,
+                EventName::RelativeDateRecalculationRequested,
             ],
         }
     }

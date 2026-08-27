@@ -1,10 +1,14 @@
+mod capture;
 mod contracts;
 mod model_resources;
 pub mod observability;
 pub mod security;
 pub mod storage;
 
-use contracts::{AppBootstrapV1, SecurityStatusV1};
+use contracts::{
+    AppBootstrapV1, ImagePreviewV1, NoticeDetailV1, NoticeStateV1, NoticeSummaryV1,
+    SecurityStatusV1,
+};
 use model_resources::{
     inspect_resources, install_resources, install_root, selected_manifest, ModelResourceStatusV1,
 };
@@ -73,6 +77,76 @@ fn install_model_resources(
         &install_root(&app_data_dir, &manifest.selection_id),
         &manifest,
     )
+}
+
+fn capture_data_directory(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .app_local_data_dir()
+        .map_err(|_| "NOTICE_STORAGE_FAILED".to_owned())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn import_text_notice(
+    app: AppHandle,
+    original_text: String,
+    published_at: String,
+) -> Result<NoticeSummaryV1, String> {
+    capture::import_text(&capture_data_directory(&app)?, original_text, published_at)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn import_image_notice(
+    app: AppHandle,
+    bytes: Vec<u8>,
+    declared_media_type: Option<String>,
+    published_at: String,
+) -> Result<NoticeSummaryV1, String> {
+    capture::import_image(
+        &capture_data_directory(&app)?,
+        bytes,
+        declared_media_type,
+        published_at,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn list_notices(
+    app: AppHandle,
+    state: Option<NoticeStateV1>,
+) -> Result<Vec<NoticeSummaryV1>, String> {
+    capture::list_notices(&capture_data_directory(&app)?, state).map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn get_notice_detail(app: AppHandle, notice_id: String) -> Result<NoticeDetailV1, String> {
+    capture::notice_detail(&capture_data_directory(&app)?, &notice_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn get_notice_image_preview(app: AppHandle, notice_id: String) -> Result<ImagePreviewV1, String> {
+    capture::image_preview(&capture_data_directory(&app)?, &notice_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn update_notice_published_time(
+    app: AppHandle,
+    notice_id: String,
+    published_at: String,
+) -> Result<(), String> {
+    capture::update_published_time(&capture_data_directory(&app)?, &notice_id, published_at)
+        .map_err(|error| error.to_string())?;
+    let _ = app.emit("relativeDateRecalculationRequested", &notice_id);
+    Ok(())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn set_notice_state(app: AppHandle, notice_id: String, state: NoticeStateV1) -> Result<(), String> {
+    capture::set_notice_state(&capture_data_directory(&app)?, &notice_id, state)
+        .map_err(|error| error.to_string())
 }
 
 fn show_main_window(app: &AppHandle) {
@@ -146,6 +220,13 @@ pub fn run() {
             get_security_status,
             get_model_resource_status,
             install_model_resources,
+            import_text_notice,
+            import_image_notice,
+            list_notices,
+            get_notice_detail,
+            get_notice_image_preview,
+            update_notice_published_time,
+            set_notice_state,
             open_quick_import,
             quit_app
         ])

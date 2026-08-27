@@ -8,6 +8,7 @@ describe("App", () => {
 
     expect(screen.getByRole("heading", { name: "收件箱" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+    expect(screen.getByText("这里还没有通知。导入文字或截图后会显示在这里。")).toBeInTheDocument();
   });
 
   it.each([
@@ -19,5 +20,15 @@ describe("App", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: new RegExp(navigationLabel) }));
     expect(screen.getByRole("heading", { name: heading, level: 2 })).toBeInTheDocument();
+  });
+
+  it("provides explicit text and image import choices", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /快速导入/ }));
+
+    expect(screen.getByRole("textbox", { name: "通知原文" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /上传截图/ }));
+    expect(screen.getByRole("button", { name: "选择通知截图" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /粘贴剪贴板图片/ })).toBeInTheDocument();
   });
 });

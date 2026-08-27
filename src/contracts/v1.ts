@@ -7,6 +7,13 @@ export type CommandName =
   | "getSecurityStatus"
   | "getModelResourceStatus"
   | "installModelResources"
+  | "importTextNotice"
+  | "importImageNotice"
+  | "listNotices"
+  | "getNoticeDetail"
+  | "getNoticeImagePreview"
+  | "updateNoticePublishedTime"
+  | "setNoticeState"
   | "openQuickImport"
   | "quitApp";
 
@@ -36,7 +43,46 @@ export interface SecurityStatusV1 {
   updater: "disabled";
 }
 
-export type EventName = "quickImportRequested" | "windowHiddenToTray";
+export type EventName =
+  "quickImportRequested" | "windowHiddenToTray" | "relativeDateRecalculationRequested";
+
+export type NoticeState =
+  | "pendingAnalysis"
+  | "pendingReview"
+  | "partiallyProcessed"
+  | "processed"
+  | "informationOnly"
+  | "failed";
+
+export interface NoticeSummaryV1 {
+  id: string;
+  sourceKind: "text" | "image";
+  inboxState: NoticeState;
+  publishedAt: string;
+  publishedTimeSource: "importTimeTentative" | "userConfirmed";
+  publishedTimeCandidate: string | null;
+  publishedTimeCandidateSource: "embeddedMetadata" | "embeddedText" | null;
+  createdAt: string;
+  excerpt: string;
+}
+
+export interface SourceAssetInfoV1 {
+  id: string;
+  mediaType: "image/png" | "image/jpeg" | "image/webp";
+  byteSize: number;
+  pixelWidth: number | null;
+  pixelHeight: number | null;
+}
+
+export interface NoticeDetailV1 extends NoticeSummaryV1 {
+  originalText: string | null;
+  sourceAsset: SourceAssetInfoV1 | null;
+}
+
+export interface ImagePreviewV1 {
+  mediaType: SourceAssetInfoV1["mediaType"];
+  bytes: number[];
+}
 
 export interface RouteDescriptorV1 {
   id: AppRouteId;

@@ -1,5 +1,4 @@
 import {
-  Archive,
   Bell,
   CalendarDays,
   Check,
@@ -9,11 +8,8 @@ import {
   Clock3,
   FileCheck2,
   Inbox,
-  Info,
   ListChecks,
-  MapPin,
   MonitorCog,
-  Paperclip,
   Plus,
   Search,
   Settings,
@@ -21,10 +17,21 @@ import {
   Sparkles,
   Upload,
 } from "lucide-react";
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 
-import type { AppRouteId } from "./contracts/v1";
-import { getSecurityStatus, isDesktopRuntime, quitDesktopApp } from "./platform/desktop";
+import type { AppRouteId, NoticeDetailV1, NoticeState, NoticeSummaryV1 } from "./contracts/v1";
+import {
+  getNoticeDetail,
+  getNoticeImagePreview,
+  getSecurityStatus,
+  importImageNotice,
+  importTextNotice,
+  isDesktopRuntime,
+  listNotices,
+  quitDesktopApp,
+  setNoticeState,
+  updateNoticePublishedTime,
+} from "./platform/desktop";
 
 type NavItem = {
   id: AppRouteId;
@@ -41,32 +48,52 @@ const navItems: NavItem[] = [
   { id: "settings", label: "设置", icon: Settings },
 ];
 
-const notices = [
-  {
-    id: 1,
-    title: "实验室安全考试通知",
-    excerpt: "请各位同学于本周五 17:00 前完成实验室安全准入考试。",
-    time: "今天 09:42",
-    status: "待确认",
-    tone: "warning",
-  },
-  {
-    id: 2,
-    title: "2026 秋季学期选课安排",
-    excerpt: "第一轮选课将于 8 月 28 日开放，请提前确认培养方案。",
-    time: "昨天 18:20",
-    status: "待分析",
-    tone: "neutral",
-  },
-  {
-    id: 3,
-    title: "图书馆暑期开放时间调整",
-    excerpt: "8 月 30 日起恢复正常开放时间。",
-    time: "8 月 24 日",
-    status: "仅供知晓",
-    tone: "success",
-  },
+const noticeStates: Array<{ id: NoticeState | "all"; label: string }> = [
+  { id: "all", label: "全部" },
+  { id: "pendingAnalysis", label: "待分析" },
+  { id: "pendingReview", label: "待确认" },
+  { id: "partiallyProcessed", label: "部分处理" },
+  { id: "processed", label: "已处理" },
+  { id: "informationOnly", label: "仅供知晓" },
+  { id: "failed", label: "处理失败" },
 ];
+
+const noticeStateLabels: Record<NoticeState, string> = {
+  pendingAnalysis: "待分析",
+  pendingReview: "待确认",
+  partiallyProcessed: "部分处理",
+  processed: "已处理",
+  informationOnly: "仅供知晓",
+  failed: "处理失败",
+};
+
+function noticeTone(state: NoticeState) {
+  if (state === "informationOnly" || state === "processed") return "success";
+  if (state === "pendingReview" || state === "partiallyProcessed" || state === "failed")
+    return "warning";
+  return "neutral";
+}
+
+function displayNoticeTitle(notice: NoticeSummaryV1) {
+  if (notice.sourceKind === "image") return "通知截图";
+  return notice.excerpt.split(/\r?\n/, 1)[0] || "文字通知";
+}
+
+function toDateTimeLocal(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return "";
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.valueOf() - offset).toISOString().slice(0, 16);
+}
+
+function initialPublishedTime() {
+  return toDateTimeLocal(new Date().toISOString());
+}
+
+function toPublishedTime(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? "" : date.toISOString();
+}
 
 function AppHeader({ activeRoute }: { activeRoute: AppRouteId }) {
   const titles: Record<AppRouteId, string> = {
@@ -97,25 +124,150 @@ function AppHeader({ activeRoute }: { activeRoute: AppRouteId }) {
   );
 }
 
-function InboxView() {
-  const [selectedId, setSelectedId] = useState(1);
-  const selectedNotice = notices.find((notice) => notice.id === selectedId) ?? notices[0];
+function InboxView({ openImport }: { openImport: () => void }) {
+  const [filter, setFilter] = useState<NoticeState | "all">("all");
+  const [notices, setNotices] = useState<NoticeSummaryV1[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<NoticeDetailV1 | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  async function refresh() {
+    if (!isDesktopRuntime()) return;
+    setLoading(true);
+    setError("");
+    try {
+      const next = await listNotices(filter === "all" ? undefined : filter);
+      setNotices(next ?? []);
+      setSelectedId((current) =>
+        current && next?.some((notice) => notice.id === current)
+          ? current
+          : (next?.[0]?.id ?? null),
+      );
+    } catch {
+      setError("无法读取本地通知，请确认应用数据目录可用。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    const refreshTimer = window.setTimeout(() => void refresh(), 0);
+    return () => window.clearTimeout(refreshTimer);
+    // The filter identifies the requested local query; refresh itself changes on each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter]);
+
+  useEffect(() => {
+    if (!selectedId || !isDesktopRuntime()) return;
+    void getNoticeDetail(selectedId)
+      .then((next) => setDetail(next))
+      .catch(() => setError("无法读取该通知的原始依据。"));
+  }, [selectedId]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  async function openSource() {
+    if (!detail) return;
+    setError("");
+    if (detail.sourceAsset) {
+      try {
+        const preview = await getNoticeImagePreview(detail.id);
+        if (preview) {
+          const nextUrl = URL.createObjectURL(
+            new Blob([new Uint8Array(preview.bytes)], { type: preview.mediaType }),
+          );
+          setPreviewUrl((current) => {
+            if (current) URL.revokeObjectURL(current);
+            return nextUrl;
+          });
+        }
+      } catch {
+        setError("截图无法读取，文件可能已损坏。");
+        return;
+      }
+    }
+    setSourceOpen(true);
+  }
+
+  async function savePublishedTime(value: string) {
+    if (!detail) return;
+    const publishedAt = toPublishedTime(value);
+    if (!publishedAt) return;
+    try {
+      await updateNoticePublishedTime(detail.id, publishedAt);
+      setDetail({
+        ...detail,
+        publishedAt,
+        publishedTimeSource: "userConfirmed",
+        publishedTimeCandidate: null,
+        publishedTimeCandidateSource: null,
+      });
+      setNotices((current) =>
+        current.map((notice) =>
+          notice.id === detail.id
+            ? {
+                ...notice,
+                publishedAt,
+                publishedTimeSource: "userConfirmed",
+                publishedTimeCandidate: null,
+                publishedTimeCandidateSource: null,
+              }
+            : notice,
+        ),
+      );
+    } catch {
+      setError("发布时间未能保存。");
+    }
+  }
+
+  async function markInformationOnly() {
+    if (!detail) return;
+    try {
+      await setNoticeState(detail.id, "informationOnly");
+      await refresh();
+    } catch {
+      setError("通知状态未能更新。");
+    }
+  }
+
   return (
     <div className="inbox-view">
       <section className="notice-column" aria-label="通知列表">
         <div className="section-toolbar">
           <div className="segmented-control" aria-label="通知筛选">
-            <button className="is-active" type="button">
-              全部
-            </button>
-            <button type="button">待处理</button>
-            <button type="button">已完成</button>
+            {noticeStates.map((state) => (
+              <button
+                className={filter === state.id ? "is-active" : ""}
+                key={state.id}
+                onClick={() => setFilter(state.id)}
+                type="button"
+              >
+                {state.label}
+              </button>
+            ))}
           </div>
-          <button className="icon-button subtle" type="button" title="归档" aria-label="归档">
-            <Archive size={18} />
+          <button
+            className="icon-button subtle"
+            onClick={openImport}
+            type="button"
+            title="导入通知"
+            aria-label="导入通知"
+          >
+            <Plus size={18} />
           </button>
         </div>
         <div className="notice-list">
+          {loading ? <p className="empty-notice">正在读取本地通知...</p> : null}
+          {!loading && !notices.length ? (
+            <p className="empty-notice">这里还没有通知。导入文字或截图后会显示在这里。</p>
+          ) : null}
           {notices.map((notice) => (
             <button
               className={`notice-row ${selectedId === notice.id ? "is-selected" : ""}`}
@@ -123,87 +275,249 @@ function InboxView() {
               onClick={() => setSelectedId(notice.id)}
               type="button"
             >
-              <span className={`status-marker ${notice.tone}`} />
+              <span className={`status-marker ${noticeTone(notice.inboxState)}`} />
               <span className="notice-copy">
                 <span className="notice-row-topline">
-                  <strong>{notice.title}</strong>
-                  <time>{notice.time}</time>
+                  <strong>{displayNoticeTitle(notice)}</strong>
+                  <time>{new Date(notice.publishedAt).toLocaleString()}</time>
                 </span>
-                <span className="notice-excerpt">{notice.excerpt}</span>
-                <span className={`status-label ${notice.tone}`}>{notice.status}</span>
+                <span className="notice-excerpt">
+                  {notice.excerpt || "已加密保存的截图，等待本地识别。"}
+                </span>
+                <span className={`status-label ${noticeTone(notice.inboxState)}`}>
+                  {noticeStateLabels[notice.inboxState]}
+                </span>
               </span>
             </button>
           ))}
         </div>
       </section>
       <section className="notice-detail" aria-label="通知详情">
-        <div className="detail-heading">
-          <div>
-            <span className="demo-label">演示数据</span>
-            <h2>{selectedNotice.title}</h2>
-            <p>来自文字粘贴 · {selectedNotice.time}</p>
-          </div>
-          <button className="secondary-button" type="button">
-            查看原文 <ChevronRight size={16} />
-          </button>
-        </div>
-        <div className="analysis-state">
-          <Sparkles size={19} />
-          <div>
-            <strong>本地分析完成</strong>
-            <span>发现 1 个任务候选，截止时间需要确认</span>
-          </div>
-        </div>
-        <div className="candidate-section">
-          <div className="section-title-row">
-            <div>
-              <p className="section-eyebrow">任务候选 1/1</p>
-              <h3>完成实验室安全准入考试</h3>
+        {detail ? (
+          <>
+            <div className="detail-heading">
+              <div>
+                <span className={`status-label ${noticeTone(detail.inboxState)}`}>
+                  {noticeStateLabels[detail.inboxState]}
+                </span>
+                <h2>{displayNoticeTitle(detail)}</h2>
+                <p>
+                  {detail.sourceKind === "text" ? "来自文字粘贴" : "来自截图"} ·{" "}
+                  {new Date(detail.publishedAt).toLocaleString()}
+                </p>
+              </div>
+              <button className="secondary-button" onClick={() => void openSource()} type="button">
+                查看原文 <ChevronRight size={16} />
+              </button>
             </div>
-            <span className="confidence-label">
-              <Info size={14} /> 待核对
-            </span>
+            <div className="analysis-state">
+              <Sparkles size={19} />
+              <div>
+                <strong>等待本地分析</strong>
+                <span>原始内容已加密保存，后续分析不会覆盖它。</span>
+              </div>
+            </div>
+            <div className="capture-details">
+              <label className="import-input">
+                <span>
+                  通知发布时间{" "}
+                  {detail.publishedTimeSource === "importTimeTentative"
+                    ? "（暂定，建议核对）"
+                    : "（已确认）"}
+                </span>
+                <input
+                  aria-label="通知发布时间"
+                  defaultValue={toDateTimeLocal(detail.publishedAt)}
+                  onBlur={(event) => void savePublishedTime(event.target.value)}
+                  type="datetime-local"
+                />
+              </label>
+              {detail.publishedTimeCandidate ? (
+                <div className="time-candidate" role="status">
+                  <div>
+                    <strong>发现截图时间候选</strong>
+                    <span>
+                      {new Date(detail.publishedTimeCandidate).toLocaleString()} ·{" "}
+                      {detail.publishedTimeCandidateSource === "embeddedMetadata"
+                        ? "图片元数据"
+                        : "图片内嵌时间串"}
+                    </span>
+                  </div>
+                  <button
+                    className="secondary-button"
+                    onClick={() =>
+                      void savePublishedTime(toDateTimeLocal(detail.publishedTimeCandidate!))
+                    }
+                    type="button"
+                  >
+                    采用候选时间
+                  </button>
+                </div>
+              ) : null}
+              {detail.sourceAsset ? (
+                <p className="source-meta">
+                  截图已加密保存 · {detail.sourceAsset.pixelWidth} ×{" "}
+                  {detail.sourceAsset.pixelHeight}
+                </p>
+              ) : (
+                <p className="source-meta">文字原文已加密保存于本地数据库。</p>
+              )}
+            </div>
+            <footer className="detail-actions">
+              <button
+                className="secondary-button"
+                onClick={() => void markInformationOnly()}
+                type="button"
+              >
+                标记为仅供知晓
+              </button>
+            </footer>
+          </>
+        ) : (
+          <div className="empty-detail">
+            <Inbox size={25} />
+            <p>选择一条通知查看原始依据和发布时间。</p>
           </div>
-          <dl className="field-list">
-            <div>
-              <dt>
-                <Clock3 size={17} /> 截止时间
-              </dt>
-              <dd>8 月 28 日 17:00</dd>
+        )}
+        {error ? <p className="form-message error">{error}</p> : null}
+        {sourceOpen && detail ? (
+          <div className="source-dialog" role="dialog" aria-modal="true" aria-label="原始通知">
+            <div className="source-dialog-content">
+              <div className="detail-heading">
+                <h2>原始通知</h2>
+                <button
+                  className="icon-button"
+                  onClick={() => {
+                    setSourceOpen(false);
+                    setPreviewUrl((current) => {
+                      if (current) URL.revokeObjectURL(current);
+                      return null;
+                    });
+                  }}
+                  type="button"
+                  aria-label="关闭原文"
+                >
+                  ×
+                </button>
+              </div>
+              {detail.originalText ? (
+                <pre className="original-text">{detail.originalText}</pre>
+              ) : null}
+              {previewUrl ? (
+                <img className="source-image" src={previewUrl} alt="原始通知截图" />
+              ) : null}
             </div>
-            <div>
-              <dt>
-                <MapPin size={17} /> 地点 / 入口
-              </dt>
-              <dd>实验室安全学习平台</dd>
-            </div>
-            <div>
-              <dt>
-                <Paperclip size={17} /> 所需材料
-              </dt>
-              <dd>校园统一身份认证</dd>
-            </div>
-          </dl>
-          <div className="evidence-block">
-            <span>原文依据</span>
-            <blockquote>“请各位同学于本周五 17:00 前完成实验室安全准入考试。”</blockquote>
           </div>
-        </div>
-        <footer className="detail-actions">
-          <button className="secondary-button" type="button">
-            暂不处理
-          </button>
-          <button className="primary-button" type="button">
-            <Check size={17} /> 前往核对
-          </button>
-        </footer>
+        ) : null}
       </section>
     </div>
   );
 }
 
-function QuickImportView() {
+function QuickImportView({ imported }: { imported: () => void }) {
   const [mode, setMode] = useState<"text" | "image">("text");
+  const [text, setText] = useState("");
+  const [publishedAt, setPublishedAt] = useState(initialPublishedTime);
+  const [image, setImage] = useState<{
+    bytes: number[];
+    mediaType: string;
+    previewUrl: string;
+  } | null>(null);
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    return () => {
+      if (image) URL.revokeObjectURL(image.previewUrl);
+    };
+  }, [image]);
+
+  async function setImageFromBlob(blob: Blob) {
+    const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+    const previewUrl = URL.createObjectURL(blob);
+    setImage((current) => {
+      if (current) URL.revokeObjectURL(current.previewUrl);
+      return { bytes, mediaType: blob.type, previewUrl };
+    });
+    setMessage("");
+  }
+
+  async function chooseImage(file: File | null) {
+    if (!file) return;
+    await setImageFromBlob(file);
+  }
+
+  async function readClipboardImage() {
+    setMessage("");
+    try {
+      const clipboardItems = await navigator.clipboard.read();
+      const item = clipboardItems.find((candidate) =>
+        candidate.types.some((type) => ["image/png", "image/jpeg", "image/webp"].includes(type)),
+      );
+      const type = item?.types.find((candidate) =>
+        ["image/png", "image/jpeg", "image/webp"].includes(candidate),
+      );
+      if (!item || !type) {
+        setMessage("剪贴板中没有可导入的 PNG、JPG 或 WebP 图片。");
+        return;
+      }
+      await setImageFromBlob(await item.getType(type));
+    } catch {
+      setMessage("无法读取剪贴板图片。请允许访问后重试，或直接选择本地截图。");
+    }
+  }
+
+  async function createNotice() {
+    const normalizedPublishedAt = toPublishedTime(publishedAt);
+    if (!normalizedPublishedAt) {
+      setMessage("请填写有效的通知发布时间。");
+      return;
+    }
+    if (!isDesktopRuntime()) {
+      setMessage("请在 Windows 桌面应用中导入通知。");
+      return;
+    }
+    setSaving(true);
+    setMessage("");
+    try {
+      if (mode === "text") await importTextNotice(text, normalizedPublishedAt);
+      else if (image)
+        await importImageNotice(image.bytes, image.mediaType || null, normalizedPublishedAt);
+      else {
+        setMessage("请先选择或粘贴一张通知截图。");
+        return;
+      }
+      setText("");
+      setImage((current) => {
+        if (current) URL.revokeObjectURL(current.previewUrl);
+        return null;
+      });
+      setMessage("通知已加密保存到本机，等待本地分析。");
+      imported();
+    } catch (error) {
+      const code = String(error);
+      setMessage(
+        code.includes("NOTICE_TEXT_REQUIRED")
+          ? "请粘贴有效的通知文字。"
+          : code.includes("NOTICE_IMAGE")
+            ? "图片格式、大小或内容无效，请更换后重试。"
+            : "通知未能保存，请检查本地数据目录。",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function clearImport() {
+    setText("");
+    setImage((current) => {
+      if (current) URL.revokeObjectURL(current.previewUrl);
+      return null;
+    });
+    setMessage("");
+  }
+
   return (
     <section className="content-page import-page" aria-labelledby="import-title">
       <div className="page-intro">
@@ -231,32 +545,86 @@ function QuickImportView() {
         {mode === "text" ? (
           <label className="import-input">
             <span>通知原文</span>
-            <textarea placeholder="在此粘贴通知文字" rows={10} />
+            <textarea
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              placeholder="在此粘贴通知文字"
+              rows={10}
+            />
           </label>
         ) : (
-          <button className="upload-zone" type="button">
-            <Upload size={28} />
-            <strong>选择通知截图</strong>
-            <span>支持 PNG、JPG 和 WebP</span>
-          </button>
+          <>
+            <input
+              ref={fileInput}
+              className="sr-only"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) => void chooseImage(event.target.files?.[0] ?? null)}
+              type="file"
+            />
+            {image ? (
+              <div className="image-import-preview">
+                <img src={image.previewUrl} alt="待导入通知截图" />
+                <button
+                  className="secondary-button"
+                  onClick={() => fileInput.current?.click()}
+                  type="button"
+                >
+                  更换截图
+                </button>
+              </div>
+            ) : (
+              <button
+                aria-label="选择通知截图"
+                className="upload-zone"
+                onClick={() => fileInput.current?.click()}
+                type="button"
+              >
+                <Upload size={28} />
+                <strong>选择通知截图</strong>
+                <span>支持 PNG、JPG 和 WebP</span>
+              </button>
+            )}
+            <button
+              className="clipboard-image-button"
+              onClick={() => void readClipboardImage()}
+              type="button"
+            >
+              <ClipboardPaste size={16} /> 粘贴剪贴板图片
+            </button>
+          </>
         )}
         <div className="import-options">
           <label>
             <span>通知发布时间</span>
-            <input type="datetime-local" />
+            <input
+              aria-label="通知发布时间"
+              value={publishedAt}
+              onChange={(event) => setPublishedAt(event.target.value)}
+              type="datetime-local"
+            />
           </label>
           <span className="privacy-note">
             <ShieldCheck size={16} /> 本地处理
           </span>
         </div>
         <div className="page-actions">
-          <button className="secondary-button" type="button">
+          <button className="secondary-button" onClick={clearImport} type="button">
             清空
           </button>
-          <button className="primary-button" type="button">
-            <Plus size={17} /> 创建通知
+          <button
+            className="primary-button"
+            disabled={saving}
+            onClick={() => void createNotice()}
+            type="button"
+          >
+            <Plus size={17} /> {saving ? "保存中" : "创建通知"}
           </button>
         </div>
+        {message ? (
+          <p className={`form-message ${message.includes("已加密") ? "success" : "error"}`}>
+            {message}
+          </p>
+        ) : null}
       </div>
     </section>
   );
@@ -469,12 +837,20 @@ function SettingsView() {
   );
 }
 
-function ActiveView({ route }: { route: AppRouteId }) {
-  if (route === "quickImport") return <QuickImportView />;
+function ActiveView({
+  route,
+  imported,
+  openImport,
+}: {
+  route: AppRouteId;
+  imported: () => void;
+  openImport: () => void;
+}) {
+  if (route === "quickImport") return <QuickImportView imported={imported} />;
   if (route === "review") return <ReviewView />;
   if (route === "tasks") return <TasksView />;
   if (route === "settings") return <SettingsView />;
-  return <InboxView />;
+  return <InboxView openImport={openImport} />;
 }
 
 export function App() {
@@ -528,7 +904,11 @@ export function App() {
       </aside>
       <main className="main-area">
         <AppHeader activeRoute={activeRoute} />
-        <ActiveView route={activeRoute} />
+        <ActiveView
+          route={activeRoute}
+          imported={() => setActiveRoute("inbox")}
+          openImport={() => setActiveRoute("quickImport")}
+        />
       </main>
     </div>
   );

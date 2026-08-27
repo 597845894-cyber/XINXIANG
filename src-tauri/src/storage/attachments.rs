@@ -40,7 +40,7 @@ impl std::fmt::Display for AttachmentError {
 
 impl std::error::Error for AttachmentError {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EncryptedAttachmentMetadata {
     pub encrypted_data_key: Vec<u8>,
     pub key_nonce: [u8; NONCE_BYTES],
@@ -59,6 +59,10 @@ impl AttachmentStore {
 
     pub fn encrypted_path(&self, attachment_id: &str) -> PathBuf {
         self.root.join(format!("{attachment_id}.enc"))
+    }
+
+    pub fn remove(&self, attachment_id: &str) {
+        let _ = fs::remove_file(self.encrypted_path(attachment_id));
     }
 
     pub fn write_from_reader(
@@ -117,13 +121,13 @@ impl AttachmentStore {
                 Err(_) => return Err(AttachmentError::Integrity),
             }
             let encrypted_length = u32::from_le_bytes(length_bytes) as usize;
-            if encrypted_length < TAG_BYTES || encrypted_length > CHUNK_BYTES + TAG_BYTES {
+            if !(TAG_BYTES..=CHUNK_BYTES + TAG_BYTES).contains(&encrypted_length) {
                 return Err(AttachmentError::InvalidFormat);
             }
             let mut encrypted_chunk = vec![0_u8; encrypted_length];
             file.read_exact(&mut encrypted_chunk)
                 .map_err(|_| AttachmentError::Integrity)?;
-            checksum.update(&length_bytes);
+            checksum.update(length_bytes);
             checksum.update(&encrypted_chunk);
             let nonce = nonce_for_chunk(metadata.content_nonce, chunk_index);
             cipher
