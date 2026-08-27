@@ -159,6 +159,23 @@ impl<'connection> NoticeRepository<'connection> {
         classifier_version: &str,
         candidates: &[NewCandidate<'_>],
     ) -> Result<(), RepositoryError> {
+        self.save_analysis_revision_full(
+            notice_id,
+            analysis_revision_id,
+            classifier_version,
+            None,
+            candidates,
+        )
+    }
+
+    pub fn save_analysis_revision_full(
+        &self,
+        notice_id: &str,
+        analysis_revision_id: &str,
+        classifier_version: &str,
+        ocr_text: Option<&str>,
+        candidates: &[NewCandidate<'_>],
+    ) -> Result<(), RepositoryError> {
         let transaction = self
             .connection
             .unchecked_transaction()
@@ -183,12 +200,13 @@ impl<'connection> NoticeRepository<'connection> {
         transaction
             .execute(
                 "INSERT INTO analysis_revisions (
-                    id, notice_id, revision_number, analysis_state, classifier_version, created_at
-                 ) VALUES (?1, ?2, ?3, 'complete', ?4, datetime('now'))",
+                    id, notice_id, revision_number, analysis_state, ocr_text, classifier_version, created_at
+                 ) VALUES (?1, ?2, ?3, 'complete', ?4, ?5, datetime('now'))",
                 params![
                     analysis_revision_id,
                     notice_id,
                     revision_number,
+                    ocr_text.map(str::as_bytes),
                     classifier_version
                 ],
             )
@@ -647,6 +665,54 @@ mod tests {
             .unwrap();
         assert_eq!(task_count, 1);
         assert_eq!(candidate_state, "pending");
+    }
+
+    #[test]
+    fn reanalysis_creates_a_new_revision_without_overwriting_the_previous_one() {
+        let database = database();
+        let repository = NoticeRepository::new(database.connection());
+        repository.create_notice("notice-revision", "text").unwrap();
+        repository
+            .save_analysis_revision_full(
+                "notice-revision",
+                "analysis-revision-1",
+                "rule-v1",
+                Some("第一版 OCR"),
+                &[NewCandidate {
+                    id: "candidate-revision-1",
+                    payload: b"{}",
+                }],
+            )
+            .unwrap();
+        repository
+            .save_analysis_revision_full(
+                "notice-revision",
+                "analysis-revision-2",
+                "rule-v2",
+                Some("第二版 OCR"),
+                &[NewCandidate {
+                    id: "candidate-revision-2",
+                    payload: b"{}",
+                }],
+            )
+            .unwrap();
+
+        let revisions: Vec<(i64, String)> = database
+            .connection()
+            .prepare(
+                "SELECT revision_number, CAST(ocr_text AS TEXT)
+                 FROM analysis_revisions WHERE notice_id = 'notice-revision'
+                 ORDER BY revision_number",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            revisions,
+            vec![(1, "第一版 OCR".to_owned()), (2, "第二版 OCR".to_owned())]
+        );
     }
 
     #[test]

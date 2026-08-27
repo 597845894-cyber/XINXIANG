@@ -458,6 +458,67 @@ button {
   color: #235642;
   background: #e9f5f0;
 }
+
+.analysis-state > .secondary-button {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.analysis-result {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+.analysis-result-heading,
+.candidate-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.analysis-result-heading span,
+.candidate-card span,
+.candidate-card em {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.analysis-result-heading span {
+  margin-left: auto;
+}
+
+.ocr-text {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  white-space: pre-wrap;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+.candidate-list {
+  display: grid;
+  gap: 8px;
+}
+
+.candidate-card {
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.candidate-card strong {
+  flex: 1;
+}
+.candidate-card em {
+  font-style: normal;
+}
 .analysis-state strong,
 .analysis-state span {
   display: block;

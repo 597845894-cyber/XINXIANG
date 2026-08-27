@@ -206,10 +206,50 @@ pub fn set_notice_state(
         .map_err(map_repository_error)
 }
 
+#[derive(Debug, Clone)]
+pub enum AnalysisInput {
+    Text(String),
+    Image { bytes: Vec<u8>, media_type: String },
+}
+
+pub fn analysis_input(
+    app_data_directory: &Path,
+    notice_id: &str,
+) -> Result<(AnalysisInput, String), CaptureError> {
+    let master_key = load_key(app_data_directory)?;
+    let database = EncryptedDatabase::open(&app_data_directory.join("inbox.db"), &master_key)
+        .map_err(|_| CaptureError::Storage)?;
+    let detail = NoticeRepository::new(database.connection())
+        .notice_detail(notice_id)
+        .map_err(map_repository_error)?;
+    let published_at = detail.summary.published_at.clone();
+    if let Some(text) = detail.original_text {
+        return Ok((AnalysisInput::Text(text), published_at));
+    }
+    let asset = detail.source_asset.ok_or(CaptureError::MissingNotice)?;
+    let mut bytes = Vec::with_capacity(asset.byte_size);
+    AttachmentStore::new(app_data_directory.join("attachments"))
+        .read_to_writer(&asset.id, &asset.metadata, &mut bytes, &master_key)
+        .map_err(|_| CaptureError::Storage)?;
+    Ok((
+        AnalysisInput::Image {
+            bytes,
+            media_type: asset.media_type,
+        },
+        published_at,
+    ))
+}
+
 fn open_database(app_data_directory: &Path) -> Result<EncryptedDatabase, CaptureError> {
     let master_key = load_key(app_data_directory)?;
     EncryptedDatabase::open(&app_data_directory.join("inbox.db"), &master_key)
         .map_err(|_| CaptureError::Storage)
+}
+
+pub fn open_database_for_analysis(
+    app_data_directory: &Path,
+) -> Result<EncryptedDatabase, CaptureError> {
+    open_database(app_data_directory)
 }
 
 fn load_key(

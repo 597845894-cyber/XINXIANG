@@ -26,6 +26,8 @@ pub enum CommandName {
     GetNoticeImagePreview,
     UpdateNoticePublishedTime,
     SetNoticeState,
+    AnalyzeNotice,
+    CancelAnalysis,
     OpenQuickImport,
     QuitApp,
 }
@@ -36,6 +38,8 @@ pub enum EventName {
     QuickImportRequested,
     WindowHiddenToTray,
     RelativeDateRecalculationRequested,
+    AnalysisProgress,
+    AnalysisCompleted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,6 +121,14 @@ pub struct ImagePreviewV1 {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisProgressV1 {
+    pub notice_id: String,
+    pub stage: String,
+    pub progress_percent: u8,
+}
+
 impl SecurityStatusV1 {
     pub fn verified() -> Self {
         Self {
@@ -169,6 +181,8 @@ impl AppBootstrapV1 {
                 CommandName::GetNoticeImagePreview,
                 CommandName::UpdateNoticePublishedTime,
                 CommandName::SetNoticeState,
+                CommandName::AnalyzeNotice,
+                CommandName::CancelAnalysis,
                 CommandName::OpenQuickImport,
                 CommandName::QuitApp,
             ],
@@ -176,6 +190,8 @@ impl AppBootstrapV1 {
                 EventName::QuickImportRequested,
                 EventName::WindowHiddenToTray,
                 EventName::RelativeDateRecalculationRequested,
+                EventName::AnalysisProgress,
+                EventName::AnalysisCompleted,
             ],
         }
     }

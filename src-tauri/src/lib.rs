@@ -4,14 +4,17 @@ mod model_resources;
 pub mod observability;
 pub mod security;
 pub mod storage;
+mod understanding;
 
 use contracts::{
-    AppBootstrapV1, ImagePreviewV1, NoticeDetailV1, NoticeStateV1, NoticeSummaryV1,
-    SecurityStatusV1,
+    AnalysisProgressV1, AppBootstrapV1, ImagePreviewV1, NoticeDetailV1, NoticeStateV1,
+    NoticeSummaryV1, SecurityStatusV1,
 };
 use model_resources::{
     inspect_resources, install_resources, install_root, selected_manifest, ModelResourceStatusV1,
 };
+use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -19,6 +22,23 @@ use tauri::{
 };
 
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+static ANALYSIS_CANCELLATIONS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static ANALYSIS_QUEUE: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn analysis_cancellations() -> &'static Mutex<HashSet<String>> {
+    ANALYSIS_CANCELLATIONS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn is_analysis_cancelled(notice_id: &str) -> bool {
+    analysis_cancellations()
+        .lock()
+        .map(|pending| pending.contains(notice_id))
+        .unwrap_or(false)
+}
+
+fn analysis_queue() -> &'static Mutex<()> {
+    ANALYSIS_QUEUE.get_or_init(|| Mutex::new(()))
+}
 #[cfg(test)]
 const PLACEHOLDER_MODEL_MANIFEST: &str =
     include_str!("../resources/model-placeholder/manifest.json");
@@ -149,6 +169,102 @@ fn set_notice_state(app: AppHandle, notice_id: String, state: NoticeStateV1) -> 
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command(rename_all = "camelCase")]
+fn analyze_notice(
+    app: AppHandle,
+    notice_id: String,
+) -> Result<understanding::AnalysisResultV1, String> {
+    let _queue_guard = analysis_queue()
+        .lock()
+        .map_err(|_| "ANALYSIS_QUEUE_UNAVAILABLE".to_owned())?;
+    if let Ok(mut pending) = analysis_cancellations().lock() {
+        pending.remove(&notice_id);
+    }
+    let emit_progress = |stage: &str, progress_percent: u8| {
+        let _ = app.emit(
+            "analysisProgress",
+            AnalysisProgressV1 {
+                notice_id: notice_id.clone(),
+                stage: stage.to_owned(),
+                progress_percent,
+            },
+        );
+    };
+    emit_progress("读取原始内容", 10);
+    if is_analysis_cancelled(&notice_id) {
+        return Err("ANALYSIS_CANCELLED".to_owned());
+    }
+    let (input, published_at) = capture::analysis_input(&capture_data_directory(&app)?, &notice_id)
+        .map_err(|error| error.to_string())?;
+    emit_progress("本地 OCR", 35);
+    if is_analysis_cancelled(&notice_id) {
+        return Err("ANALYSIS_CANCELLED".to_owned());
+    }
+    let revision_id = format!("analysis-{}", uuid::Uuid::new_v4());
+    let result = match input {
+        capture::AnalysisInput::Text(text) => {
+            emit_progress("规则提取与分类", 65);
+            understanding::analyze_text(&text, &published_at, revision_id.clone())
+        }
+        capture::AnalysisInput::Image { bytes, media_type } => {
+            emit_progress("图像预处理与分块识别", 55);
+            understanding::analyze_image(&bytes, &media_type, &published_at, revision_id.clone())
+        }
+    }
+    .map_err(|error| error.to_string())?;
+    if is_analysis_cancelled(&notice_id) {
+        return Err("ANALYSIS_CANCELLED".to_owned());
+    }
+    emit_progress("保存分析版本", 85);
+
+    let database = capture::open_database_for_analysis(&capture_data_directory(&app)?)
+        .map_err(|error| error.to_string())?;
+    let mut ids = Vec::with_capacity(result.candidates.len());
+    let mut payloads = Vec::with_capacity(result.candidates.len());
+    for (index, candidate) in result.candidates.iter().enumerate() {
+        ids.push(format!("{}-{}", result.revision_id, index));
+        payloads.push(
+            serde_json::to_vec(candidate).map_err(|_| "ANALYSIS_SERIALIZE_FAILED".to_owned())?,
+        );
+    }
+    let rows = ids
+        .iter()
+        .zip(payloads.iter())
+        .map(|(id, payload)| storage::repository::NewCandidate { id, payload })
+        .collect::<Vec<_>>();
+    let ocr_text = result.ocr.as_ref().map(|ocr| {
+        ocr.lines
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
+    storage::repository::NoticeRepository::new(database.connection())
+        .save_analysis_revision_full(
+            &notice_id,
+            &result.revision_id,
+            &result.classifier_version,
+            ocr_text.as_deref(),
+            &rows,
+        )
+        .map_err(|error| error.to_string())?;
+    emit_progress("分析完成", 100);
+    let _ = app.emit("analysisCompleted", &result);
+    if let Ok(mut pending) = analysis_cancellations().lock() {
+        pending.remove(&notice_id);
+    }
+    Ok(result)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn cancel_analysis(notice_id: String) -> Result<(), String> {
+    analysis_cancellations()
+        .lock()
+        .map_err(|_| "ANALYSIS_CANCEL_STATE_UNAVAILABLE".to_owned())?
+        .insert(notice_id);
+    Ok(())
+}
+
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -227,6 +343,8 @@ pub fn run() {
             get_notice_image_preview,
             update_notice_published_time,
             set_notice_state,
+            analyze_notice,
+            cancel_analysis,
             open_quick_import,
             quit_app
         ])
@@ -236,7 +354,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_hide_to_tray, APP_VERSION, PLACEHOLDER_MODEL_MANIFEST};
+    use super::{
+        analysis_cancellations, cancel_analysis, is_analysis_cancelled, should_hide_to_tray,
+        APP_VERSION, PLACEHOLDER_MODEL_MANIFEST,
+    };
 
     #[test]
     fn app_version_is_semver_compatible() {
@@ -259,5 +380,13 @@ mod tests {
         assert_eq!(manifest["schemaVersion"], 1);
         assert_eq!(manifest["placeholder"], true);
         assert_eq!(manifest["file"], "placeholder-model.txt");
+    }
+
+    #[test]
+    fn cancellation_requests_are_scoped_to_the_notice() {
+        cancel_analysis("notice-cancel".to_owned()).unwrap();
+        assert!(is_analysis_cancelled("notice-cancel"));
+        assert!(!is_analysis_cancelled("notice-other"));
+        analysis_cancellations().lock().unwrap().clear();
     }
 }

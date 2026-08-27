@@ -14,6 +14,8 @@ export type CommandName =
   | "getNoticeImagePreview"
   | "updateNoticePublishedTime"
   | "setNoticeState"
+  | "analyzeNotice"
+  | "cancelAnalysis"
   | "openQuickImport"
   | "quitApp";
 
@@ -44,7 +46,72 @@ export interface SecurityStatusV1 {
 }
 
 export type EventName =
-  "quickImportRequested" | "windowHiddenToTray" | "relativeDateRecalculationRequested";
+  | "quickImportRequested"
+  | "windowHiddenToTray"
+  | "relativeDateRecalculationRequested"
+  | "analysisProgress"
+  | "analysisCompleted";
+
+export interface OcrPointV1 {
+  x: number;
+  y: number;
+}
+
+export interface OcrLineV1 {
+  text: string;
+  confidence: number;
+  boxPoints: [OcrPointV1, OcrPointV1, OcrPointV1, OcrPointV1];
+}
+
+export interface OcrResultV1 {
+  adapter: string;
+  elapsedMs: number;
+  lines: OcrLineV1[];
+  lowConfidence: boolean;
+}
+
+export interface ExtractedFieldV1 {
+  name: string;
+  value: string | null;
+  confidence: number;
+  evidence: string[];
+  status: "trusted" | "needsReview" | "missing" | "conflict";
+}
+
+export interface TaskCandidatePayloadV1 {
+  title: string;
+  startAt: string | null;
+  dueAt: string | null;
+  dueExpression: string | null;
+  location: string | null;
+  submissionUrl: string | null;
+  materials: string[];
+  audience: string | null;
+  required: boolean | null;
+  confidence: number;
+  evidence: string[];
+  status: "trusted" | "needsReview" | "missing" | "conflict";
+}
+
+export interface AnalysisResultV1 {
+  schemaVersion: 1;
+  revisionId: string;
+  classifierVersion: string;
+  normalizedText: string;
+  ocr: OcrResultV1 | null;
+  category: string;
+  categoryConfidence: number;
+  fields: ExtractedFieldV1[];
+  candidates: TaskCandidatePayloadV1[];
+  warnings: string[];
+  requiresReview: boolean;
+}
+
+export interface AnalysisProgressV1 {
+  noticeId: string;
+  stage: string;
+  progressPercent: number;
+}
 
 export type NoticeState =
   | "pendingAnalysis"

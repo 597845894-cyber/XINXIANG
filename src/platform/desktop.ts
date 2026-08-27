@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ImagePreviewV1,
+  AnalysisProgressV1,
+  AnalysisResultV1,
   ModelResourceStatusV1,
   NoticeDetailV1,
   NoticeState,
@@ -87,3 +89,15 @@ export async function setNoticeState(noticeId: string, state: NoticeState): Prom
   if (!isDesktopRuntime()) return;
   await invoke("set_notice_state", { noticeId, state });
 }
+
+export async function analyzeNotice(noticeId: string): Promise<AnalysisResultV1 | null> {
+  if (!isDesktopRuntime()) return null;
+  return invoke<AnalysisResultV1>("analyze_notice", { noticeId });
+}
+
+export async function cancelAnalysis(noticeId: string): Promise<void> {
+  if (!isDesktopRuntime()) return;
+  await invoke("cancel_analysis", { noticeId });
+}
+
+export type AnalysisProgressHandler = (progress: AnalysisProgressV1) => void;

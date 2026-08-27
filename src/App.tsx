@@ -16,14 +16,23 @@ import {
   ShieldCheck,
   Sparkles,
   Upload,
+  X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ComponentType } from "react";
 
-import type { AppRouteId, NoticeDetailV1, NoticeState, NoticeSummaryV1 } from "./contracts/v1";
+import type {
+  AnalysisResultV1,
+  AppRouteId,
+  NoticeDetailV1,
+  NoticeState,
+  NoticeSummaryV1,
+} from "./contracts/v1";
 import {
   getNoticeDetail,
   getNoticeImagePreview,
   getSecurityStatus,
+  analyzeNotice,
+  cancelAnalysis,
   importImageNotice,
   importTextNotice,
   isDesktopRuntime,
@@ -133,6 +142,8 @@ function InboxView({ openImport }: { openImport: () => void }) {
   const [error, setError] = useState("");
   const [sourceOpen, setSourceOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisResultV1 | null>(null);
+  const [analysisState, setAnalysisState] = useState<"idle" | "running" | "failed">("idle");
 
   async function refresh() {
     if (!isDesktopRuntime()) return;
@@ -237,6 +248,42 @@ function InboxView({ openImport }: { openImport: () => void }) {
     }
   }
 
+  async function runAnalysis() {
+    if (!detail) return;
+    setAnalysisState("running");
+    setError("");
+    try {
+      const result = await analyzeNotice(detail.id);
+      setAnalysis(result);
+      await refresh();
+      if (result) {
+        setDetail((current) =>
+          current
+            ? { ...current, inboxState: result.requiresReview ? "pendingReview" : "processed" }
+            : current,
+        );
+      }
+      setAnalysisState("idle");
+    } catch (error) {
+      setAnalysisState("failed");
+      setError(
+        String(error).includes("ANALYSIS_OCR_NO_TEXT")
+          ? "未能从截图提取文字，可先手工录入后重试。"
+          : "本地分析未完成，请稍后重试。",
+      );
+    }
+  }
+
+  async function stopAnalysis() {
+    if (!detail) return;
+    try {
+      await cancelAnalysis(detail.id);
+      setError("已请求取消本地分析。");
+    } catch {
+      setError("取消分析请求未能发送。");
+    }
+  }
+
   return (
     <div className="inbox-view">
       <section className="notice-column" aria-label="通知列表">
@@ -313,10 +360,67 @@ function InboxView({ openImport }: { openImport: () => void }) {
             <div className="analysis-state">
               <Sparkles size={19} />
               <div>
-                <strong>等待本地分析</strong>
-                <span>原始内容已加密保存，后续分析不会覆盖它。</span>
+                <strong>
+                  {analysisState === "running"
+                    ? "正在本地分析"
+                    : analysisState === "failed"
+                      ? "分析失败，可修正后重试"
+                      : analysis
+                        ? "分析完成，等待核对"
+                        : "等待本地分析"}
+                </strong>
+                <span>原始内容已加密保存，分析结果会生成新的版本。</span>
               </div>
+              {!analysis && detail.inboxState !== "processed" ? (
+                <button
+                  className="secondary-button"
+                  disabled={analysisState === "running"}
+                  onClick={() => void runAnalysis()}
+                  type="button"
+                >
+                  {analysisState === "running" ? "分析中" : "开始分析"}
+                </button>
+              ) : null}
+              {analysisState === "running" ? (
+                <button
+                  className="secondary-button"
+                  onClick={() => void stopAnalysis()}
+                  type="button"
+                >
+                  <X size={16} />
+                  取消分析
+                </button>
+              ) : null}
             </div>
+            {analysis ? (
+              <div className="analysis-result" aria-label="本地分析结果">
+                <div className="analysis-result-heading">
+                  <strong>{analysis.category}</strong>
+                  <span>{Math.round(analysis.categoryConfidence * 100)}% 可信</span>
+                </div>
+                {analysis.ocr ? <pre className="ocr-text">{analysis.normalizedText}</pre> : null}
+                {analysis.candidates.length ? (
+                  <div className="candidate-list">
+                    {analysis.candidates.map((candidate) => (
+                      <article
+                        key={`${analysis.revisionId}-${candidate.title}`}
+                        className="candidate-card"
+                      >
+                        <strong>{candidate.title}</strong>
+                        <span>
+                          {candidate.dueAt
+                            ? new Date(candidate.dueAt).toLocaleString()
+                            : "时间待确认"}
+                        </span>
+                        <em>{candidate.status === "trusted" ? "可快速核对" : "需要核对"}</em>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="source-meta">未生成任务候选，可标记为仅供知晓。</p>
+                )}
+              </div>
+            ) : null}
             <div className="capture-details">
               <label className="import-input">
                 <span>
