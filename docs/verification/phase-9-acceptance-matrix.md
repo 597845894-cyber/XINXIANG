@@ -53,9 +53,9 @@ Rust 检查入口为 `pnpm format:rust`、`pnpm lint:rust` 和 `pnpm test:rust`�
 - `9.4`：待 8 GB、CPU-only Windows 基准机；当前没有可用基准环境。
 - `9.5`：安全实现已有代码和测试，当前 Rust 执行环境阻塞。
 - `9.6`：需要按本矩阵的人工入口完成两档分辨率及 125%/150% 缩放记录。
-- `9.7`：用户已明确不安装虚拟机，因此保持未完成。
+- `9.7`：已改为用户在当前 Windows 主机人工验收；完成后填写 `phase-9-user-release-acceptance.md` 并再勾选。
 - `9.8`：已完成，见 `docs/user-guide/local-privacy-and-recovery.md`。
 
 ## 人工验收入口
 
-运行 `pnpm dev` 打开本地界面；按阶段 5、6、7、8 验收文档依次检查导入、分析基线、任务、提醒、备份恢复和删除。真实 Windows 桌面壳使用 `pnpm tauri dev`。所有测试数据应使用项目内合成样本，不导入真实个人通知。
+运行 `pnpm dev` 打开本地界面；按阶段 5、6、7、8 验收文档依次检查导入、分析基线、任务、提醒、备份恢复和删除。真实 Windows 桌面壳使用 `pnpm tauri dev`。安装包、托盘、离线和卸载验收按 `phase-9-user-release-acceptance.md` 执行。所有测试数据应使用项目内合成样本，不导入真实个人通知。
