@@ -4,9 +4,10 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::{
+    backup::{self, BackupSummary},
     contracts::{
-        CandidateViewV1, ImagePreviewV1, NoticeDetailV1, NoticeRelationViewV1, NoticeStateV1,
-        NoticeSummaryV1, ReminderViewV1, SourceAssetInfoV1, TaskViewV1,
+        BackupSummaryV1, CandidateViewV1, ImagePreviewV1, NoticeDetailV1, NoticeRelationViewV1,
+        NoticeStateV1, NoticeSummaryV1, ReminderViewV1, SourceAssetInfoV1, TaskViewV1,
     },
     security::key_protection::{DpapiCurrentUserProtector, MasterKeyManager},
     storage::{
@@ -138,7 +139,7 @@ pub fn import_image(
         .create_image_notice(&notice_id, &published_at, time_candidate.as_ref(), &asset)
         .is_err()
     {
-        store.remove(&asset_id);
+        let _ = store.remove(&asset_id);
         return Err(CaptureError::Storage);
     }
     summary_for(&repository, &notice_id)
@@ -358,6 +359,69 @@ pub fn list_tasks(app_data_directory: &Path) -> Result<Vec<TaskViewV1>, CaptureE
         .list_tasks()
         .map(|tasks| tasks.into_iter().filter_map(task_to_contract).collect())
         .map_err(|_| CaptureError::Storage)
+}
+
+pub fn create_backup(
+    app_data_directory: &Path,
+    target_path: &Path,
+    password: &str,
+) -> Result<BackupSummaryV1, CaptureError> {
+    let database = open_database(app_data_directory)?;
+    database
+        .connection()
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        .map_err(|_| CaptureError::Storage)?;
+    let summary = backup_summary(database.connection())?;
+    drop(database);
+    backup::create(app_data_directory, target_path, password, summary)
+        .map(backup_to_contract)
+        .map_err(|_| CaptureError::Storage)
+}
+
+pub fn inspect_backup(path: &Path, password: &str) -> Result<BackupSummaryV1, CaptureError> {
+    backup::inspect(path, password)
+        .map(backup_to_contract)
+        .map_err(|_| CaptureError::Storage)
+}
+
+pub fn restore_backup(
+    app_data_directory: &Path,
+    path: &Path,
+    password: &str,
+) -> Result<BackupSummaryV1, CaptureError> {
+    backup::restore(app_data_directory, path, password)
+        .map(backup_to_contract)
+        .map_err(|_| CaptureError::Storage)
+}
+
+pub fn delete_notice_cascade(
+    app_data_directory: &Path,
+    notice_id: &str,
+) -> Result<(), CaptureError> {
+    let database = open_database(app_data_directory)?;
+    let asset_ids = NoticeRepository::new(database.connection())
+        .delete_notice_cascade(notice_id)
+        .map_err(map_repository_error)?;
+    let store = AttachmentStore::new(app_data_directory.join("attachments"));
+    for asset_id in asset_ids {
+        store.remove(&asset_id).map_err(|_| CaptureError::Storage)?;
+    }
+    Ok(())
+}
+
+pub fn delete_notice_keep_tasks(
+    app_data_directory: &Path,
+    notice_id: &str,
+) -> Result<(), CaptureError> {
+    let database = open_database(app_data_directory)?;
+    let asset_ids = NoticeRepository::new(database.connection())
+        .detach_notice_keep_tasks(notice_id)
+        .map_err(map_repository_error)?;
+    let store = AttachmentStore::new(app_data_directory.join("attachments"));
+    for asset_id in asset_ids {
+        store.remove(&asset_id).map_err(|_| CaptureError::Storage)?;
+    }
+    Ok(())
 }
 
 pub fn create_manual_task(
@@ -587,7 +651,40 @@ fn task_to_contract(task: crate::storage::repository::TaskRecord) -> Option<Task
         payload,
         created_at: task.created_at,
         updated_at: task.updated_at,
+        source_removed_at: task.source_removed_at,
     })
+}
+
+fn backup_summary(connection: &rusqlite::Connection) -> Result<BackupSummary, CaptureError> {
+    let count = |table: &str| -> Result<u64, CaptureError> {
+        connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .map_err(|_| CaptureError::Storage)
+    };
+    let created_at = connection
+        .query_row("SELECT datetime('now')", [], |row| row.get(0))
+        .map_err(|_| CaptureError::Storage)?;
+    Ok(BackupSummary {
+        format_version: 1,
+        created_at,
+        notice_count: count("notices")?,
+        task_count: count("tasks")?,
+        attachment_count: count("source_assets")?,
+        byte_size: 0,
+    })
+}
+
+fn backup_to_contract(summary: BackupSummary) -> BackupSummaryV1 {
+    BackupSummaryV1 {
+        format_version: summary.format_version,
+        created_at: summary.created_at,
+        notice_count: summary.notice_count,
+        task_count: summary.task_count,
+        attachment_count: summary.attachment_count,
+        byte_size: summary.byte_size,
+    }
 }
 
 fn reminder_to_contract(reminder: ReminderRecord) -> ReminderViewV1 {

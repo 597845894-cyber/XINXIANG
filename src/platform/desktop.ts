@@ -4,6 +4,7 @@ import type {
   CandidateViewV1,
   AnalysisProgressV1,
   AnalysisResultV1,
+  BackupSummaryV1,
   ModelResourceStatusV1,
   NoticeDetailV1,
   NoticeState,
@@ -220,6 +221,40 @@ export async function listNoticeRelations(
 export async function resolveNoticeRelation(relationId: string, accepted: boolean) {
   if (!isDesktopRuntime()) return;
   await invoke("resolve_notice_relation", { relationId, accepted });
+}
+
+export async function createBackup(
+  targetPath: string,
+  password: string,
+): Promise<BackupSummaryV1 | null> {
+  if (!isDesktopRuntime()) return null;
+  return invoke<BackupSummaryV1>("create_backup", { targetPath, password });
+}
+
+export async function inspectBackup(
+  path: string,
+  password: string,
+): Promise<BackupSummaryV1 | null> {
+  if (!isDesktopRuntime()) return null;
+  return invoke<BackupSummaryV1>("inspect_backup", { path, password });
+}
+
+export async function restoreBackup(
+  path: string,
+  password: string,
+): Promise<BackupSummaryV1 | null> {
+  if (!isDesktopRuntime()) return null;
+  return invoke<BackupSummaryV1>("restore_backup", { path, password, confirmed: true });
+}
+
+export async function deleteNoticeCascade(noticeId: string) {
+  if (!isDesktopRuntime()) return;
+  await invoke("delete_notice_cascade", { noticeId, confirmed: true });
+}
+
+export async function deleteNoticeKeepTasks(noticeId: string) {
+  if (!isDesktopRuntime()) return;
+  await invoke("delete_notice_keep_tasks", { noticeId, confirmed: true });
 }
 
 export type AnalysisProgressHandler = (progress: AnalysisProgressV1) => void;

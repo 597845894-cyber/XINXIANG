@@ -36,6 +36,7 @@ fixtures/private/
 *.sqlite
 *.sqlite3
 *.xinxiang-backup
+*.xinxiang
 
 # Local model binaries
 /models/

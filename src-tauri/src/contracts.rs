@@ -48,6 +48,11 @@ pub enum CommandName {
     UpsertReminder,
     DeleteReminder,
     RunReminderScan,
+    CreateBackup,
+    InspectBackup,
+    RestoreBackup,
+    DeleteNoticeCascade,
+    DeleteNoticeKeepTasks,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +173,18 @@ pub struct TaskViewV1 {
     pub payload: serde_json::Value,
     pub created_at: String,
     pub updated_at: String,
+    pub source_removed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupSummaryV1 {
+    pub format_version: u8,
+    pub created_at: String,
+    pub notice_count: u64,
+    pub task_count: u64,
+    pub attachment_count: u64,
+    pub byte_size: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -276,6 +293,11 @@ impl AppBootstrapV1 {
                 CommandName::UpsertReminder,
                 CommandName::DeleteReminder,
                 CommandName::RunReminderScan,
+                CommandName::CreateBackup,
+                CommandName::InspectBackup,
+                CommandName::RestoreBackup,
+                CommandName::DeleteNoticeCascade,
+                CommandName::DeleteNoticeKeepTasks,
             ],
             events: vec![
                 EventName::QuickImportRequested,

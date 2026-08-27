@@ -60,6 +60,11 @@ import {
   listReminders,
   upsertReminder,
   deleteReminder,
+  createBackup,
+  inspectBackup,
+  restoreBackup,
+  deleteNoticeCascade,
+  deleteNoticeKeepTasks,
 } from "./platform/desktop";
 
 type NavItem = {
@@ -178,6 +183,8 @@ function InboxView({ openImport }: { openImport: () => void }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResultV1 | null>(null);
   const [analysisState, setAnalysisState] = useState<"idle" | "running" | "failed">("idle");
+  const [deleteMode, setDeleteMode] = useState<"cascade" | "keepTasks" | null>(null);
+  const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
 
   async function refresh() {
     if (!isDesktopRuntime()) return;
@@ -269,6 +276,21 @@ function InboxView({ openImport }: { openImport: () => void }) {
       );
     } catch {
       setError("发布时间未能保存。");
+    }
+  }
+
+  async function deleteSelectedNotice() {
+    if (!detail || !deleteMode || !deleteAcknowledged) return;
+    try {
+      if (deleteMode === "cascade") await deleteNoticeCascade(detail.id);
+      else await deleteNoticeKeepTasks(detail.id);
+      setDeleteMode(null);
+      setDeleteAcknowledged(false);
+      setDetail(null);
+      setSelectedId(null);
+      await refresh();
+    } catch {
+      setError("删除未完成。本地数据保持不变，请稍后重试。");
     }
   }
 
@@ -509,6 +531,13 @@ function InboxView({ openImport }: { openImport: () => void }) {
               >
                 标记为仅供知晓
               </button>
+              <button
+                className="danger-button"
+                onClick={() => setDeleteMode("cascade")}
+                type="button"
+              >
+                删除通知
+              </button>
             </footer>
           </>
         ) : (
@@ -544,6 +573,71 @@ function InboxView({ openImport }: { openImport: () => void }) {
               {previewUrl ? (
                 <img className="source-image" src={previewUrl} alt="原始通知截图" />
               ) : null}
+            </div>
+          </div>
+        ) : null}
+        {deleteMode && detail ? (
+          <div className="source-dialog" role="dialog" aria-modal="true" aria-label="删除通知确认">
+            <div className="source-dialog-content delete-dialog">
+              <div className="detail-heading">
+                <div>
+                  <h2>{deleteMode === "cascade" ? "永久删除通知" : "保留任务并删除原文"}</h2>
+                  <p>
+                    {deleteMode === "cascade"
+                      ? "将同时删除该通知的分析记录、关联任务、未来提醒和加密附件。"
+                      : "任务将保留，但会明确标记为缺少原文依据，之后不能再查看通知内容或截图。"}
+                  </p>
+                </div>
+                <button
+                  className="icon-button"
+                  onClick={() => setDeleteMode(null)}
+                  type="button"
+                  aria-label="关闭删除确认"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="delete-options">
+                <button
+                  className="secondary-button"
+                  onClick={() => setDeleteMode("cascade")}
+                  type="button"
+                >
+                  删除全部关联数据
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={() => setDeleteMode("keepTasks")}
+                  type="button"
+                >
+                  保留任务，只删原文
+                </button>
+              </div>
+              <label className="confirm-check">
+                <input
+                  checked={deleteAcknowledged}
+                  onChange={(event) => setDeleteAcknowledged(event.target.checked)}
+                  type="checkbox"
+                />
+                我理解此操作无法撤销
+              </label>
+              <div className="page-actions">
+                <button
+                  className="secondary-button"
+                  onClick={() => setDeleteMode(null)}
+                  type="button"
+                >
+                  取消
+                </button>
+                <button
+                  className="danger-button"
+                  disabled={!deleteAcknowledged}
+                  onClick={() => void deleteSelectedNotice()}
+                  type="button"
+                >
+                  确认删除
+                </button>
+              </div>
             </div>
           </div>
         ) : null}
@@ -799,9 +893,14 @@ function ReviewView() {
 
   async function refresh() {
     const next = await listReviewCandidates();
-    if (next) setCandidates(next);
-    else if (!candidates.length) {
-      setCandidates([
+    if (next) {
+      setCandidates(next);
+      if (!selectedId && next[0]) {
+        setSelectedId(next[0].id);
+        setEditedTitle(next[0].payload.title);
+      }
+    } else if (!candidates.length) {
+      const demoCandidates: CandidateViewV1[] = [
         {
           id: "demo-candidate-1",
           noticeId: "demo-notice",
@@ -826,23 +925,24 @@ function ReviewView() {
           },
           createdAt: new Date().toISOString(),
         },
-      ]);
+      ];
+      setCandidates(demoCandidates);
+      setSelectedId(demoCandidates[0].id);
+      setEditedTitle(demoCandidates[0].payload.title);
     }
   }
 
   useEffect(() => {
-    // Loading local candidates updates view state asynchronously.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refresh();
+    const timer = window.setTimeout(() => void refresh(), 0);
+    return () => window.clearTimeout(timer);
     // Candidate list is loaded once when entering the review view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    // Keep the editable title aligned with the selected candidate.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEditedTitle(selected?.payload.title ?? "");
-  }, [selectedId, selected]);
+  function selectCandidate(candidate: CandidateViewV1 | undefined) {
+    setSelectedId(candidate?.id ?? null);
+    setEditedTitle(candidate?.payload.title ?? "");
+  }
 
   async function editCandidate() {
     if (!selected || !editedTitle.trim()) return;
@@ -865,8 +965,9 @@ function ReviewView() {
         ...selected.payload,
         title: editedTitle.trim() || selected.payload.title,
       });
-      setCandidates((current) => current.filter((item) => item.id !== selected.id));
-      setSelectedId(null);
+      const remaining = candidates.filter((item) => item.id !== selected.id);
+      setCandidates(remaining);
+      selectCandidate(remaining[0]);
       setMessage("已创建正式任务，并记录确认操作。");
     } catch {
       setMessage("确认失败，请先补全任务名称。");
@@ -877,8 +978,9 @@ function ReviewView() {
     if (!selected) return;
     try {
       await ignoreTaskCandidate(selected.id);
-      setCandidates((current) => current.filter((item) => item.id !== selected.id));
-      setSelectedId(null);
+      const remaining = candidates.filter((item) => item.id !== selected.id);
+      setCandidates(remaining);
+      selectCandidate(remaining[0]);
       setMessage("候选已忽略，不会重复提示。");
     } catch {
       setMessage("忽略操作未能保存。");
@@ -975,7 +1077,7 @@ function ReviewView() {
             <button
               className={`table-row ${selected?.id === candidate.id ? "is-selected" : ""}`}
               key={candidate.id}
-              onClick={() => setSelectedId(candidate.id)}
+              onClick={() => selectCandidate(candidate)}
               type="button"
             >
               <strong>{candidate.payload.title}</strong>
@@ -1140,6 +1242,7 @@ function TasksView() {
           payload: demoTaskPayload,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
+          sourceRemovedAt: null,
         },
         {
           id: "demo-task-2",
@@ -1154,6 +1257,7 @@ function TasksView() {
           },
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
+          sourceRemovedAt: null,
         },
         {
           id: "demo-task-3",
@@ -1162,13 +1266,13 @@ function TasksView() {
           payload: { ...demoTaskPayload, title: "提交宿舍住宿确认" },
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
+          sourceRemovedAt: null,
         },
       ]);
   }
   useEffect(() => {
-    // Load the local task table when entering the view.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refresh();
+    const timer = window.setTimeout(() => void refresh(), 0);
+    return () => window.clearTimeout(timer);
     // The task loader intentionally runs once when entering this view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1230,6 +1334,7 @@ function TasksView() {
             },
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
+            sourceRemovedAt: null,
           },
           ...current,
         ]);
@@ -1376,6 +1481,7 @@ function TasksView() {
                         </>
                       )}
                     </p>
+                    {task.sourceRemovedAt ? <p className="source-removed">原文依据已删除</p> : null}
                   </div>
                   <div className="task-actions">
                     <button
@@ -1434,6 +1540,13 @@ function SettingsView() {
   const [launchAtLogin, setLaunchAtLogin] = useState(
     () => localStorage.getItem("launchAtLogin") === "true",
   );
+  const [backupPath, setBackupPath] = useState("");
+  const [backupPassword, setBackupPassword] = useState("");
+  const [restorePath, setRestorePath] = useState("");
+  const [restorePassword, setRestorePassword] = useState("");
+  const [backupPreview, setBackupPreview] = useState("");
+  const [backupConfirmed, setBackupConfirmed] = useState(false);
+  const [backupMessage, setBackupMessage] = useState("");
 
   function toggleReminders(enabled: boolean) {
     setRemindersEnabled(enabled);
@@ -1453,6 +1566,55 @@ function SettingsView() {
       setSecurityStatus("verified");
     } catch {
       setSecurityStatus("failed");
+    }
+  }
+
+  async function createLocalBackup() {
+    if (!backupPath.trim() || backupPassword.length < 8) {
+      setBackupMessage("请输入本地备份文件路径和至少 8 位的口令。");
+      return;
+    }
+    try {
+      const summary = await createBackup(backupPath.trim(), backupPassword);
+      setBackupMessage(
+        summary
+          ? `备份已创建，包含 ${summary.noticeCount} 条通知和 ${summary.taskCount} 个任务。`
+          : "浏览器演示模式不创建文件。",
+      );
+      setBackupPassword("");
+    } catch {
+      setBackupMessage("备份未创建。请确认路径可写、文件不存在且口令有效。");
+    }
+  }
+
+  async function inspectLocalBackup() {
+    if (!restorePath.trim() || !restorePassword) {
+      setBackupMessage("请输入备份路径和口令后再预检。");
+      return;
+    }
+    try {
+      const summary = await inspectBackup(restorePath.trim(), restorePassword);
+      if (!summary) return;
+      setBackupPreview(
+        `该备份包含 ${summary.noticeCount} 条通知、${summary.taskCount} 个任务和 ${summary.attachmentCount} 个附件。`,
+      );
+      setBackupConfirmed(false);
+      setBackupMessage("预检完成。恢复会替换当前本地数据。");
+    } catch {
+      setBackupPreview("");
+      setBackupMessage("备份无效或口令不正确；当前数据没有改动。");
+    }
+  }
+
+  async function restoreLocalBackup() {
+    if (!backupConfirmed) return;
+    try {
+      await restoreBackup(restorePath.trim(), restorePassword);
+      setBackupMessage("恢复完成。请返回收件箱核对已恢复的数据。");
+      setRestorePassword("");
+      setBackupConfirmed(false);
+    } catch {
+      setBackupMessage("恢复未完成。当前数据仍保持不变。");
     }
   }
 
@@ -1538,6 +1700,89 @@ function SettingsView() {
           ? "提醒权限：已启用；若 Windows 拒绝系统通知，应用内通知中心仍会保留记录。"
           : "提醒已关闭，后台不会产生新的提醒通知。"}
       </p>
+      <section className="backup-panel" aria-labelledby="backup-title">
+        <div className="page-intro">
+          <p className="section-eyebrow">本地数据保护</p>
+          <h2 id="backup-title">备份与恢复</h2>
+          <p>
+            备份文件由你设置的口令保护，不会上传到网络。请将备份保存到本机或自己控制的移动存储设备。
+          </p>
+        </div>
+        <div className="backup-grid">
+          <div>
+            <h3>创建加密备份</h3>
+            <label>
+              备份文件路径
+              <input
+                value={backupPath}
+                onChange={(event) => setBackupPath(event.target.value)}
+                placeholder="D:\\校园信箱备份.xinxiang"
+              />
+            </label>
+            <label>
+              备份口令
+              <input
+                value={backupPassword}
+                onChange={(event) => setBackupPassword(event.target.value)}
+                type="password"
+              />
+            </label>
+            <button
+              className="secondary-button"
+              onClick={() => void createLocalBackup()}
+              type="button"
+            >
+              创建备份
+            </button>
+          </div>
+          <div>
+            <h3>恢复本地备份</h3>
+            <label>
+              备份文件路径
+              <input value={restorePath} onChange={(event) => setRestorePath(event.target.value)} />
+            </label>
+            <label>
+              备份口令
+              <input
+                value={restorePassword}
+                onChange={(event) => setRestorePassword(event.target.value)}
+                type="password"
+              />
+            </label>
+            <div className="backup-actions">
+              <button
+                className="secondary-button"
+                onClick={() => void inspectLocalBackup()}
+                type="button"
+              >
+                预检备份
+              </button>
+            </div>
+            {backupPreview ? <p className="backup-preview">{backupPreview}</p> : null}
+            <label className="confirm-check">
+              <input
+                checked={backupConfirmed}
+                disabled={!backupPreview}
+                onChange={(event) => setBackupConfirmed(event.target.checked)}
+                type="checkbox"
+              />
+              我理解恢复将替换当前本地数据
+            </label>
+            <button
+              className="danger-button"
+              disabled={!backupConfirmed}
+              onClick={() => void restoreLocalBackup()}
+              type="button"
+            >
+              确认恢复
+            </button>
+          </div>
+        </div>
+        <p className="form-message">
+          {backupMessage ||
+            "积累通知和任务后，请尽早创建一份口令保护的本地备份。卸载应用时，请选择保留加密数据；选择永久删除数据后无法恢复。"}
+        </p>
+      </section>
       <div className="quit-panel">
         <div>
           <strong>彻底退出应用</strong>

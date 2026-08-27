@@ -1,3 +1,4 @@
+mod backup;
 mod capture;
 mod contracts;
 mod model_resources;
@@ -7,9 +8,9 @@ pub mod storage;
 mod understanding;
 
 use contracts::{
-    AnalysisProgressV1, AppBootstrapV1, CandidateViewV1, ImagePreviewV1, NoticeDetailV1,
-    NoticeRelationViewV1, NoticeStateV1, NoticeSummaryV1, NotificationEventV1, ReminderViewV1,
-    SecurityStatusV1, TaskViewV1,
+    AnalysisProgressV1, AppBootstrapV1, BackupSummaryV1, CandidateViewV1, ImagePreviewV1,
+    NoticeDetailV1, NoticeRelationViewV1, NoticeStateV1, NoticeSummaryV1, NotificationEventV1,
+    ReminderViewV1, SecurityStatusV1, TaskViewV1,
 };
 use model_resources::{
     inspect_resources, install_resources, install_root, selected_manifest, ModelResourceStatusV1,
@@ -164,6 +165,66 @@ fn capture_data_directory(app: &AppHandle) -> Result<std::path::PathBuf, String>
     app.path()
         .app_local_data_dir()
         .map_err(|_| "NOTICE_STORAGE_FAILED".to_owned())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn create_backup(
+    app: AppHandle,
+    target_path: String,
+    password: String,
+) -> Result<BackupSummaryV1, String> {
+    capture::create_backup(
+        &capture_data_directory(&app)?,
+        std::path::Path::new(&target_path),
+        &password,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn inspect_backup(path: String, password: String) -> Result<BackupSummaryV1, String> {
+    capture::inspect_backup(std::path::Path::new(&path), &password)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn restore_backup(
+    app: AppHandle,
+    path: String,
+    password: String,
+    confirmed: bool,
+) -> Result<BackupSummaryV1, String> {
+    if !confirmed {
+        return Err("BACKUP_RESTORE_CONFIRMATION_REQUIRED".to_owned());
+    }
+    capture::restore_backup(
+        &capture_data_directory(&app)?,
+        std::path::Path::new(&path),
+        &password,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn delete_notice_cascade(app: AppHandle, notice_id: String, confirmed: bool) -> Result<(), String> {
+    if !confirmed {
+        return Err("NOTICE_DELETE_CONFIRMATION_REQUIRED".to_owned());
+    }
+    capture::delete_notice_cascade(&capture_data_directory(&app)?, &notice_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn delete_notice_keep_tasks(
+    app: AppHandle,
+    notice_id: String,
+    confirmed: bool,
+) -> Result<(), String> {
+    if !confirmed {
+        return Err("NOTICE_DELETE_CONFIRMATION_REQUIRED".to_owned());
+    }
+    capture::delete_notice_keep_tasks(&capture_data_directory(&app)?, &notice_id)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -550,7 +611,12 @@ pub fn run() {
             list_reminders,
             upsert_reminder,
             delete_reminder,
-            run_reminder_scan
+            run_reminder_scan,
+            create_backup,
+            inspect_backup,
+            restore_backup,
+            delete_notice_cascade,
+            delete_notice_keep_tasks
         ])
         .run(tauri::generate_context!())
         .expect("failed to run campus notice inbox");

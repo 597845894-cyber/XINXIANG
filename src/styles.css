@@ -1163,6 +1163,82 @@ button {
   border-radius: 6px;
   background: #fff;
 }
+.backup-panel {
+  margin-top: 30px;
+  padding-top: 4px;
+  border-top: 1px solid #dce2df;
+}
+.backup-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.backup-grid > div {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #dce2df;
+  border-radius: 6px;
+  background: #fff;
+}
+.backup-grid h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.backup-grid label {
+  display: grid;
+  gap: 6px;
+  color: #59655f;
+  font-size: 12px;
+}
+.backup-grid input {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #ccd5d1;
+  border-radius: 6px;
+  background: #fff;
+}
+.backup-actions {
+  display: flex;
+  gap: 8px;
+}
+.backup-preview {
+  margin: 0;
+  padding: 9px;
+  color: #235642;
+  background: #e9f5f0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.source-removed {
+  margin: 5px 0 0;
+  color: #9a4c36;
+  font-size: 12px;
+}
+.confirm-check {
+  display: flex !important;
+  align-items: center;
+  gap: 8px !important;
+  color: #4b5852 !important;
+  font-size: 13px !important;
+}
+.confirm-check input {
+  min-height: auto;
+}
+.delete-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.delete-dialog {
+  max-width: 620px;
+}
+@media (max-width: 720px) {
+  .backup-grid {
+    grid-template-columns: 1fr;
+  }
+}
 
 @media (min-width: 1600px) {
   .app-shell {

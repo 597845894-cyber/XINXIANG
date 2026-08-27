@@ -4,7 +4,7 @@ use rusqlite::{Connection, OpenFlags};
 
 use crate::security::key_protection::MasterKey;
 
-const CURRENT_SCHEMA_VERSION: i64 = 6;
+const CURRENT_SCHEMA_VERSION: i64 = 7;
 
 #[derive(Debug)]
 pub enum DatabaseError {
@@ -119,6 +119,7 @@ fn apply_migrations(connection: &Connection) -> Result<(), DatabaseError> {
             4 => add_notice_capture_fields(&transaction)?,
             5 => add_published_time_candidates(&transaction)?,
             6 => add_task_management_audit(&transaction)?,
+            7 => add_task_source_removal_status(&transaction)?,
             _ => return Err(DatabaseError::Migration),
         }
         transaction
@@ -271,6 +272,17 @@ fn add_task_management_audit(transaction: &rusqlite::Transaction<'_>) -> Result<
             CREATE INDEX task_revisions_by_task ON task_revisions(task_id, revision_number);
             CREATE INDEX tasks_by_state ON tasks(task_state, updated_at DESC);
             ALTER TABLE notice_relations ADD COLUMN evidence BLOB;",
+        )
+        .map_err(|_| DatabaseError::Migration)
+}
+
+fn add_task_source_removal_status(
+    transaction: &rusqlite::Transaction<'_>,
+) -> Result<(), DatabaseError> {
+    transaction
+        .execute_batch(
+            "ALTER TABLE tasks ADD COLUMN source_removed_at TEXT;
+             CREATE INDEX tasks_by_source_removal ON tasks(source_removed_at);",
         )
         .map_err(|_| DatabaseError::Migration)
 }

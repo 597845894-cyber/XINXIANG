@@ -172,6 +172,7 @@ pub struct TaskRecord {
     pub payload: Vec<u8>,
     pub created_at: String,
     pub updated_at: String,
+    pub source_removed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -581,7 +582,7 @@ impl<'connection> NoticeRepository<'connection> {
             .connection
             .prepare(
                 "SELECT task.id, task.notice_id, task.task_state, task.current_revision_id,
-                    revision.payload, task.created_at, task.updated_at
+                    revision.payload, task.created_at, task.updated_at, task.source_removed_at
              FROM tasks task
              LEFT JOIN task_revisions revision ON revision.id = task.current_revision_id
              ORDER BY task.updated_at DESC",
@@ -598,6 +599,7 @@ impl<'connection> NoticeRepository<'connection> {
                     payload: row.get(4)?.unwrap_or_default(),
                     created_at: row.get(5)?,
                     updated_at: row.get(6)?,
+                    source_removed_at: row.get(7)?,
                 })
             })
             .map_err(|_| RepositoryError::Database)?;
@@ -1049,6 +1051,68 @@ impl<'connection> NoticeRepository<'connection> {
         Ok(())
     }
 
+    pub fn delete_notice_cascade(&self, notice_id: &str) -> Result<Vec<String>, RepositoryError> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|_| RepositoryError::Database)?;
+        let asset_ids = asset_ids_for_notice(&transaction, notice_id)?;
+        let exists: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM notices WHERE id = ?1)",
+                [notice_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| RepositoryError::Database)?;
+        if !exists {
+            return Err(RepositoryError::MissingNotice);
+        }
+        transaction
+            .execute("DELETE FROM tasks WHERE notice_id = ?1", [notice_id])
+            .map_err(|_| RepositoryError::Database)?;
+        transaction
+            .execute("DELETE FROM notices WHERE id = ?1", [notice_id])
+            .map_err(|_| RepositoryError::Database)?;
+        transaction
+            .commit()
+            .map_err(|_| RepositoryError::Database)?;
+        Ok(asset_ids)
+    }
+
+    pub fn detach_notice_keep_tasks(
+        &self,
+        notice_id: &str,
+    ) -> Result<Vec<String>, RepositoryError> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|_| RepositoryError::Database)?;
+        let asset_ids = asset_ids_for_notice(&transaction, notice_id)?;
+        let exists: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM notices WHERE id = ?1)",
+                [notice_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| RepositoryError::Database)?;
+        if !exists {
+            return Err(RepositoryError::MissingNotice);
+        }
+        transaction
+            .execute(
+                "UPDATE tasks SET notice_id = NULL, source_removed_at = datetime('now'), updated_at = datetime('now') WHERE notice_id = ?1",
+                [notice_id],
+            )
+            .map_err(|_| RepositoryError::Database)?;
+        transaction
+            .execute("DELETE FROM notices WHERE id = ?1", [notice_id])
+            .map_err(|_| RepositoryError::Database)?;
+        transaction
+            .commit()
+            .map_err(|_| RepositoryError::Database)?;
+        Ok(asset_ids)
+    }
+
     fn source_asset_for_notice(
         &self,
         notice_id: &str,
@@ -1076,6 +1140,20 @@ impl<'connection> NoticeRepository<'connection> {
 
 fn to_nonce(value: Vec<u8>) -> rusqlite::Result<[u8; 12]> {
     value.try_into().map_err(|_| rusqlite::Error::InvalidQuery)
+}
+
+fn asset_ids_for_notice(
+    transaction: &Transaction<'_>,
+    notice_id: &str,
+) -> Result<Vec<String>, RepositoryError> {
+    let mut statement = transaction
+        .prepare("SELECT id FROM source_assets WHERE notice_id = ?1")
+        .map_err(|_| RepositoryError::Database)?;
+    let rows = statement
+        .query_map([notice_id], |row| row.get(0))
+        .map_err(|_| RepositoryError::Database)?;
+    rows.map(|row| row.map_err(|_| RepositoryError::Database))
+        .collect()
 }
 
 fn to_checksum(value: Vec<u8>) -> rusqlite::Result<[u8; 32]> {
@@ -1361,5 +1439,102 @@ mod tests {
         assert_eq!(detail.original_text.as_deref(), Some("保留原文"));
         assert_eq!(detail.summary.published_at, "2026-08-28T09:00:00Z");
         assert_eq!(detail.summary.published_time_source, "userConfirmed");
+    }
+
+    #[test]
+    fn cascade_delete_removes_notice_tasks_reminders_and_related_records() {
+        let database = database();
+        let repository = NoticeRepository::new(database.connection());
+        repository.create_notice("notice-delete", "text").unwrap();
+        repository.create_notice("notice-related", "text").unwrap();
+        repository
+            .save_analysis_revision(
+                "notice-delete",
+                "analysis-delete",
+                "rule-v1",
+                &[NewCandidate {
+                    id: "candidate-delete",
+                    payload: b"{}",
+                }],
+            )
+            .unwrap();
+        repository
+            .confirm_candidate("candidate-delete", "task-delete", "revision-delete", b"{}")
+            .unwrap();
+        repository
+            .upsert_reminder(&ReminderRecord {
+                id: "reminder-delete".to_owned(),
+                task_id: "task-delete".to_owned(),
+                scheduled_at: "2999-01-01T00:00:00Z".to_owned(),
+                reminder_state: "pending".to_owned(),
+                idempotency_key: "task-delete:due".to_owned(),
+                created_at: String::new(),
+            })
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "INSERT INTO notice_relations (id, notice_id, related_notice_id, relation_type, relation_state, created_at) VALUES ('relation-delete', 'notice-delete', 'notice-related', 'duplicate', 'pending', datetime('now'))",
+                [],
+            )
+            .unwrap();
+
+        repository.delete_notice_cascade("notice-delete").unwrap();
+
+        for table in [
+            "notices",
+            "analysis_revisions",
+            "task_candidates",
+            "tasks",
+            "task_revisions",
+            "reminders",
+            "notice_relations",
+        ] {
+            let count: i64 = database
+                .connection()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, if table == "notices" { 1 } else { 0 }, "{table}");
+        }
+        assert!(matches!(
+            repository.notice_detail("notice-delete"),
+            Err(RepositoryError::MissingNotice)
+        ));
+    }
+
+    #[test]
+    fn detaching_notice_keeps_task_and_marks_its_source_as_removed() {
+        let database = database();
+        let repository = NoticeRepository::new(database.connection());
+        repository.create_notice("notice-detach", "text").unwrap();
+        repository
+            .save_analysis_revision(
+                "notice-detach",
+                "analysis-detach",
+                "rule-v1",
+                &[NewCandidate {
+                    id: "candidate-detach",
+                    payload: b"{}",
+                }],
+            )
+            .unwrap();
+        repository
+            .confirm_candidate("candidate-detach", "task-detach", "revision-detach", b"{}")
+            .unwrap();
+
+        repository
+            .detach_notice_keep_tasks("notice-detach")
+            .unwrap();
+
+        let task = repository.list_tasks().unwrap().pop().unwrap();
+        assert_eq!(task.id, "task-detach");
+        assert!(task.notice_id.is_none());
+        assert!(task.source_removed_at.is_some());
+        assert!(matches!(
+            repository.notice_detail("notice-detach"),
+            Err(RepositoryError::MissingNotice)
+        ));
     }
 }

@@ -41,7 +41,12 @@
     "listReminders",
     "upsertReminder",
     "deleteReminder",
-    "runReminderScan"
+    "runReminderScan",
+    "createBackup",
+    "inspectBackup",
+    "restoreBackup",
+    "deleteNoticeCascade",
+    "deleteNoticeKeepTasks"
   ],
   "events": [
     "quickImportRequested",

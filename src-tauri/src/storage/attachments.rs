@@ -61,8 +61,12 @@ impl AttachmentStore {
         self.root.join(format!("{attachment_id}.enc"))
     }
 
-    pub fn remove(&self, attachment_id: &str) {
-        let _ = fs::remove_file(self.encrypted_path(attachment_id));
+    pub fn remove(&self, attachment_id: &str) -> Result<(), AttachmentError> {
+        match fs::remove_file(self.encrypted_path(attachment_id)) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(AttachmentError::Io),
+        }
     }
 
     pub fn write_from_reader(

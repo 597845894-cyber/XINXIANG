@@ -35,7 +35,12 @@ export type CommandName =
   | "listReminders"
   | "upsertReminder"
   | "deleteReminder"
-  | "runReminderScan";
+  | "runReminderScan"
+  | "createBackup"
+  | "inspectBackup"
+  | "restoreBackup"
+  | "deleteNoticeCascade"
+  | "deleteNoticeKeepTasks";
 
 export type ModelResourceState = "available" | "missing" | "corrupt";
 
@@ -148,6 +153,16 @@ export interface TaskViewV1 {
   payload: TaskCandidatePayloadV1;
   createdAt: string;
   updatedAt: string;
+  sourceRemovedAt: string | null;
+}
+
+export interface BackupSummaryV1 {
+  formatVersion: number;
+  createdAt: string;
+  noticeCount: number;
+  taskCount: number;
+  attachmentCount: number;
+  byteSize: number;
 }
 
 export interface ReminderViewV1 {
