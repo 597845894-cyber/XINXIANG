@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ImagePreviewV1,
+  CandidateViewV1,
   AnalysisProgressV1,
   AnalysisResultV1,
   ModelResourceStatusV1,
@@ -8,6 +9,9 @@ import type {
   NoticeState,
   NoticeSummaryV1,
   SecurityStatusV1,
+  TaskViewV1,
+  NoticeRelationViewV1,
+  TaskCandidatePayloadV1,
 } from "../contracts/v1";
 
 declare global {
@@ -98,6 +102,93 @@ export async function analyzeNotice(noticeId: string): Promise<AnalysisResultV1 
 export async function cancelAnalysis(noticeId: string): Promise<void> {
   if (!isDesktopRuntime()) return;
   await invoke("cancel_analysis", { noticeId });
+}
+
+export async function listReviewCandidates(): Promise<CandidateViewV1[] | null> {
+  if (!isDesktopRuntime()) return null;
+  return invoke<CandidateViewV1[]>("list_review_candidates");
+}
+
+export async function editTaskCandidate(candidateId: string, payload: TaskCandidatePayloadV1) {
+  if (!isDesktopRuntime()) return;
+  await invoke("edit_task_candidate", { candidateId, payload });
+}
+
+export async function confirmTaskCandidate(
+  candidateId: string,
+  payload: TaskCandidatePayloadV1,
+): Promise<TaskViewV1 | null> {
+  if (!isDesktopRuntime()) return null;
+  return invoke<TaskViewV1>("confirm_task_candidate", { candidateId, payload });
+}
+
+export async function ignoreTaskCandidate(candidateId: string) {
+  if (!isDesktopRuntime()) return;
+  await invoke("ignore_task_candidate", { candidateId });
+}
+
+export async function mergeTaskCandidates(
+  targetId: string,
+  sourceIds: string[],
+  payload: TaskCandidatePayloadV1,
+) {
+  if (!isDesktopRuntime()) return;
+  await invoke("merge_task_candidates", { targetId, sourceIds, payload });
+}
+
+export async function splitTaskCandidate(candidateId: string, payloads: TaskCandidatePayloadV1[]) {
+  if (!isDesktopRuntime()) return;
+  await invoke("split_task_candidate", { candidateId, payloads });
+}
+
+export async function listTasks(): Promise<TaskViewV1[] | null> {
+  if (!isDesktopRuntime()) return null;
+  return invoke<TaskViewV1[]>("list_tasks");
+}
+
+export async function createManualTask(
+  payload: TaskCandidatePayloadV1,
+): Promise<TaskViewV1 | null> {
+  if (!isDesktopRuntime()) return null;
+  return invoke<TaskViewV1>("create_manual_task", { payload });
+}
+
+export async function updateTask(taskId: string, payload: TaskCandidatePayloadV1) {
+  if (!isDesktopRuntime()) return;
+  await invoke("update_task", { taskId, payload });
+}
+
+export async function setTaskState(
+  taskId: string,
+  state: TaskViewV1["state"],
+  payload: TaskCandidatePayloadV1,
+) {
+  if (!isDesktopRuntime()) return;
+  await invoke("set_task_state", { taskId, state, payload });
+}
+
+export async function getTaskHistory(taskId: string): Promise<TaskCandidatePayloadV1[] | null> {
+  if (!isDesktopRuntime()) return null;
+  return invoke<TaskCandidatePayloadV1[]>("get_task_history", { taskId });
+}
+
+export async function suggestNoticeRelations(
+  noticeId: string,
+): Promise<NoticeRelationViewV1[] | null> {
+  if (!isDesktopRuntime()) return null;
+  return invoke<NoticeRelationViewV1[]>("suggest_notice_relations", { noticeId });
+}
+
+export async function listNoticeRelations(
+  noticeId?: string,
+): Promise<NoticeRelationViewV1[] | null> {
+  if (!isDesktopRuntime()) return null;
+  return invoke<NoticeRelationViewV1[]>("list_notice_relations", { noticeId: noticeId ?? null });
+}
+
+export async function resolveNoticeRelation(relationId: string, accepted: boolean) {
+  if (!isDesktopRuntime()) return;
+  await invoke("resolve_notice_relation", { relationId, accepted });
 }
 
 export type AnalysisProgressHandler = (progress: AnalysisProgressV1) => void;

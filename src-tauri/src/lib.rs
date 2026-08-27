@@ -7,8 +7,8 @@ pub mod storage;
 mod understanding;
 
 use contracts::{
-    AnalysisProgressV1, AppBootstrapV1, ImagePreviewV1, NoticeDetailV1, NoticeStateV1,
-    NoticeSummaryV1, SecurityStatusV1,
+    AnalysisProgressV1, AppBootstrapV1, CandidateViewV1, ImagePreviewV1, NoticeDetailV1,
+    NoticeRelationViewV1, NoticeStateV1, NoticeSummaryV1, SecurityStatusV1, TaskViewV1,
 };
 use model_resources::{
     inspect_resources, install_resources, install_root, selected_manifest, ModelResourceStatusV1,
@@ -265,6 +265,126 @@ fn cancel_analysis(notice_id: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command(rename_all = "camelCase")]
+fn list_review_candidates(app: AppHandle) -> Result<Vec<CandidateViewV1>, String> {
+    capture::list_review_candidates(&capture_data_directory(&app)?)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn edit_task_candidate(
+    app: AppHandle,
+    candidate_id: String,
+    payload: serde_json::Value,
+) -> Result<(), String> {
+    capture::edit_task_candidate(&capture_data_directory(&app)?, &candidate_id, payload)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn confirm_task_candidate(
+    app: AppHandle,
+    candidate_id: String,
+    payload: serde_json::Value,
+) -> Result<TaskViewV1, String> {
+    capture::confirm_task_candidate(&capture_data_directory(&app)?, &candidate_id, payload)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn ignore_task_candidate(app: AppHandle, candidate_id: String) -> Result<(), String> {
+    capture::ignore_task_candidate(&capture_data_directory(&app)?, &candidate_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn merge_task_candidates(
+    app: AppHandle,
+    target_id: String,
+    source_ids: Vec<String>,
+    payload: serde_json::Value,
+) -> Result<(), String> {
+    capture::merge_task_candidates(
+        &capture_data_directory(&app)?,
+        &target_id,
+        &source_ids,
+        payload,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn split_task_candidate(
+    app: AppHandle,
+    candidate_id: String,
+    payloads: Vec<serde_json::Value>,
+) -> Result<(), String> {
+    capture::split_task_candidate(&capture_data_directory(&app)?, &candidate_id, payloads)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn list_tasks(app: AppHandle) -> Result<Vec<TaskViewV1>, String> {
+    capture::list_tasks(&capture_data_directory(&app)?).map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn create_manual_task(app: AppHandle, payload: serde_json::Value) -> Result<TaskViewV1, String> {
+    capture::create_manual_task(&capture_data_directory(&app)?, payload)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn update_task(app: AppHandle, task_id: String, payload: serde_json::Value) -> Result<(), String> {
+    capture::update_task(&capture_data_directory(&app)?, &task_id, payload)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn set_task_state(
+    app: AppHandle,
+    task_id: String,
+    state: String,
+    payload: serde_json::Value,
+) -> Result<(), String> {
+    capture::set_task_state(&capture_data_directory(&app)?, &task_id, &state, payload)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn get_task_history(app: AppHandle, task_id: String) -> Result<Vec<serde_json::Value>, String> {
+    capture::task_history(&capture_data_directory(&app)?, &task_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn suggest_notice_relations(
+    app: AppHandle,
+    notice_id: String,
+) -> Result<Vec<NoticeRelationViewV1>, String> {
+    capture::suggest_notice_relations(&capture_data_directory(&app)?, &notice_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn list_notice_relations(
+    app: AppHandle,
+    notice_id: Option<String>,
+) -> Result<Vec<NoticeRelationViewV1>, String> {
+    capture::list_notice_relations(&capture_data_directory(&app)?, notice_id.as_deref())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn resolve_notice_relation(
+    app: AppHandle,
+    relation_id: String,
+    accepted: bool,
+) -> Result<(), String> {
+    capture::resolve_notice_relation(&capture_data_directory(&app)?, &relation_id, accepted)
+        .map_err(|error| error.to_string())
+}
+
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -345,6 +465,20 @@ pub fn run() {
             set_notice_state,
             analyze_notice,
             cancel_analysis,
+            list_review_candidates,
+            edit_task_candidate,
+            confirm_task_candidate,
+            ignore_task_candidate,
+            merge_task_candidates,
+            split_task_candidate,
+            list_tasks,
+            create_manual_task,
+            update_task,
+            set_task_state,
+            get_task_history,
+            suggest_notice_relations,
+            list_notice_relations,
+            resolve_notice_relation,
             open_quick_import,
             quit_app
         ])

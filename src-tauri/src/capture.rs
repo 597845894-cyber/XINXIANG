@@ -5,15 +5,16 @@ use uuid::Uuid;
 
 use crate::{
     contracts::{
-        ImagePreviewV1, NoticeDetailV1, NoticeStateV1, NoticeSummaryV1, SourceAssetInfoV1,
+        CandidateViewV1, ImagePreviewV1, NoticeDetailV1, NoticeRelationViewV1, NoticeStateV1,
+        NoticeSummaryV1, SourceAssetInfoV1, TaskViewV1,
     },
     security::key_protection::{DpapiCurrentUserProtector, MasterKeyManager},
     storage::{
         attachments::AttachmentStore,
         database::EncryptedDatabase,
         repository::{
-            NoticeDetail, NoticeRepository, NoticeState, NoticeSummary, PublishedTimeCandidate,
-            SourceAsset,
+            CandidateState, NewCandidate, NoticeDetail, NoticeRelationRecord, NoticeRepository,
+            NoticeState, NoticeSummary, PublishedTimeCandidate, SourceAsset, TaskState,
         },
     },
 };
@@ -38,6 +39,7 @@ pub enum CaptureError {
     InvalidImage,
     Storage,
     MissingNotice,
+    InvalidPayload,
 }
 
 impl std::fmt::Display for CaptureError {
@@ -50,6 +52,7 @@ impl std::fmt::Display for CaptureError {
             Self::InvalidImage => "NOTICE_IMAGE_INVALID",
             Self::Storage => "NOTICE_STORAGE_FAILED",
             Self::MissingNotice => "NOTICE_NOT_FOUND",
+            Self::InvalidPayload => "TASK_PAYLOAD_INVALID",
         };
         formatter.write_str(code)
     }
@@ -250,6 +253,317 @@ pub fn open_database_for_analysis(
     app_data_directory: &Path,
 ) -> Result<EncryptedDatabase, CaptureError> {
     open_database(app_data_directory)
+}
+
+pub fn list_review_candidates(
+    app_data_directory: &Path,
+) -> Result<Vec<CandidateViewV1>, CaptureError> {
+    let database = open_database(app_data_directory)?;
+    NoticeRepository::new(database.connection())
+        .list_candidates(Some(CandidateState::Pending))
+        .map(|candidates| {
+            candidates
+                .into_iter()
+                .filter_map(candidate_to_contract)
+                .collect()
+        })
+        .map_err(|_| CaptureError::Storage)
+}
+
+pub fn edit_task_candidate(
+    app_data_directory: &Path,
+    candidate_id: &str,
+    payload: serde_json::Value,
+) -> Result<(), CaptureError> {
+    let payload = validated_payload(payload)?;
+    let database = open_database(app_data_directory)?;
+    NoticeRepository::new(database.connection())
+        .edit_candidate(candidate_id, &payload)
+        .map_err(map_repository_error)
+}
+
+pub fn confirm_task_candidate(
+    app_data_directory: &Path,
+    candidate_id: &str,
+    payload: serde_json::Value,
+) -> Result<TaskViewV1, CaptureError> {
+    let payload = validated_payload(payload)?;
+    let task_id = new_id();
+    let database = open_database(app_data_directory)?;
+    let repository = NoticeRepository::new(database.connection());
+    repository
+        .confirm_candidate(candidate_id, &task_id, &new_id(), &payload)
+        .map_err(map_repository_error)?;
+    repository
+        .list_tasks()
+        .map_err(map_repository_error)?
+        .into_iter()
+        .find(|task| task.id == task_id)
+        .and_then(task_to_contract)
+        .ok_or(CaptureError::Storage)
+}
+
+pub fn ignore_task_candidate(
+    app_data_directory: &Path,
+    candidate_id: &str,
+) -> Result<(), CaptureError> {
+    let database = open_database(app_data_directory)?;
+    NoticeRepository::new(database.connection())
+        .set_candidate_state(candidate_id, CandidateState::Ignored)
+        .map_err(map_repository_error)
+}
+
+pub fn merge_task_candidates(
+    app_data_directory: &Path,
+    target_id: &str,
+    source_ids: &[String],
+    payload: serde_json::Value,
+) -> Result<(), CaptureError> {
+    let payload = validated_payload(payload)?;
+    let database = open_database(app_data_directory)?;
+    let sources = source_ids.iter().map(String::as_str).collect::<Vec<_>>();
+    NoticeRepository::new(database.connection())
+        .merge_candidates(target_id, &sources, &payload)
+        .map_err(map_repository_error)
+}
+
+pub fn split_task_candidate(
+    app_data_directory: &Path,
+    candidate_id: &str,
+    payloads: Vec<serde_json::Value>,
+) -> Result<(), CaptureError> {
+    if payloads.len() < 2 {
+        return Err(CaptureError::Storage);
+    }
+    let serialized = payloads
+        .into_iter()
+        .map(validated_payload)
+        .collect::<Result<Vec<_>, _>>()?;
+    let ids = (0..serialized.len()).map(|_| new_id()).collect::<Vec<_>>();
+    let candidates = ids
+        .iter()
+        .zip(serialized.iter())
+        .map(|(id, payload)| NewCandidate { id, payload })
+        .collect::<Vec<_>>();
+    let database = open_database(app_data_directory)?;
+    NoticeRepository::new(database.connection())
+        .split_candidate(candidate_id, &candidates)
+        .map_err(map_repository_error)
+}
+
+pub fn list_tasks(app_data_directory: &Path) -> Result<Vec<TaskViewV1>, CaptureError> {
+    let database = open_database(app_data_directory)?;
+    NoticeRepository::new(database.connection())
+        .list_tasks()
+        .map(|tasks| tasks.into_iter().filter_map(task_to_contract).collect())
+        .map_err(|_| CaptureError::Storage)
+}
+
+pub fn create_manual_task(
+    app_data_directory: &Path,
+    payload: serde_json::Value,
+) -> Result<TaskViewV1, CaptureError> {
+    let payload = validated_payload(payload)?;
+    let task_id = new_id();
+    let database = open_database(app_data_directory)?;
+    let repository = NoticeRepository::new(database.connection());
+    repository
+        .create_manual_task(&task_id, &new_id(), &payload)
+        .map_err(map_repository_error)?;
+    repository
+        .list_tasks()
+        .map_err(map_repository_error)?
+        .into_iter()
+        .find(|task| task.id == task_id)
+        .and_then(task_to_contract)
+        .ok_or(CaptureError::Storage)
+}
+
+pub fn update_task(
+    app_data_directory: &Path,
+    task_id: &str,
+    payload: serde_json::Value,
+) -> Result<(), CaptureError> {
+    let payload = validated_payload(payload)?;
+    let database = open_database(app_data_directory)?;
+    NoticeRepository::new(database.connection())
+        .transition_task(task_id, TaskState::Todo, &payload, &new_id())
+        .map_err(map_repository_error)
+}
+
+pub fn set_task_state(
+    app_data_directory: &Path,
+    task_id: &str,
+    state: &str,
+    payload: serde_json::Value,
+) -> Result<(), CaptureError> {
+    let payload = validated_payload(payload)?;
+    let state = match state {
+        "todo" => TaskState::Todo,
+        "completed" => TaskState::Completed,
+        "cancelled" => TaskState::Cancelled,
+        _ => return Err(CaptureError::Storage),
+    };
+    let database = open_database(app_data_directory)?;
+    NoticeRepository::new(database.connection())
+        .transition_task(task_id, state, &payload, &new_id())
+        .map_err(map_repository_error)
+}
+
+pub fn task_history(
+    app_data_directory: &Path,
+    task_id: &str,
+) -> Result<Vec<serde_json::Value>, CaptureError> {
+    let database = open_database(app_data_directory)?;
+    NoticeRepository::new(database.connection())
+        .task_history(task_id)
+        .map_err(map_repository_error)?
+        .into_iter()
+        .map(|payload| serde_json::from_slice(&payload).map_err(|_| CaptureError::Storage))
+        .collect()
+}
+
+pub fn suggest_notice_relations(
+    app_data_directory: &Path,
+    notice_id: &str,
+) -> Result<Vec<NoticeRelationViewV1>, CaptureError> {
+    let database = open_database(app_data_directory)?;
+    let repository = NoticeRepository::new(database.connection());
+    let candidates = repository
+        .list_candidates(None)
+        .map_err(map_repository_error)?;
+    let titles = candidates
+        .iter()
+        .filter_map(|candidate| {
+            payload_title(&candidate.payload).map(|title| (candidate.notice_id.as_str(), title))
+        })
+        .collect::<Vec<_>>();
+    for (other_notice_id, title) in titles.iter().filter(|(id, _)| *id == notice_id) {
+        let _ = other_notice_id;
+        let normalized = normalize_key(title);
+        for (comparison_notice_id, comparison_title) in
+            titles.iter().filter(|(id, _)| *id != notice_id)
+        {
+            if normalized == normalize_key(comparison_title) {
+                let evidence = serde_json::to_vec(&serde_json::json!({
+                    "matchedTitle": title,
+                    "otherTitle": comparison_title,
+                    "reason": "normalizedTitle",
+                }))
+                .map_err(|_| CaptureError::Storage)?;
+                let relation = NoticeRelationRecord {
+                    id: new_id(),
+                    notice_id: notice_id.to_owned(),
+                    related_notice_id: (*comparison_notice_id).to_owned(),
+                    relation_type: "duplicate".to_owned(),
+                    relation_state: "suggested".to_owned(),
+                    evidence,
+                    created_at: String::new(),
+                };
+                let _ = repository.create_relation(&relation);
+            }
+        }
+    }
+    list_notice_relations(app_data_directory, Some(notice_id))
+}
+
+pub fn list_notice_relations(
+    app_data_directory: &Path,
+    notice_id: Option<&str>,
+) -> Result<Vec<NoticeRelationViewV1>, CaptureError> {
+    let database = open_database(app_data_directory)?;
+    NoticeRepository::new(database.connection())
+        .list_relations(notice_id)
+        .map(|relations| {
+            relations
+                .into_iter()
+                .filter_map(relation_to_contract)
+                .collect()
+        })
+        .map_err(|_| CaptureError::Storage)
+}
+
+pub fn resolve_notice_relation(
+    app_data_directory: &Path,
+    relation_id: &str,
+    accepted: bool,
+) -> Result<(), CaptureError> {
+    let database = open_database(app_data_directory)?;
+    NoticeRepository::new(database.connection())
+        .set_relation_state(relation_id, if accepted { "accepted" } else { "rejected" })
+        .map_err(map_repository_error)
+}
+
+fn validated_payload(payload: serde_json::Value) -> Result<Vec<u8>, CaptureError> {
+    if !payload.is_object()
+        || payload
+            .get("title")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .is_none()
+    {
+        return Err(CaptureError::InvalidPayload);
+    }
+    serde_json::to_vec(&payload).map_err(|_| CaptureError::InvalidPayload)
+}
+
+fn candidate_to_contract(
+    candidate: crate::storage::repository::CandidateRecord,
+) -> Option<CandidateViewV1> {
+    let payload = serde_json::from_slice(&candidate.payload).ok()?;
+    Some(CandidateViewV1 {
+        id: candidate.id,
+        notice_id: candidate.notice_id,
+        analysis_revision_id: candidate.analysis_revision_id,
+        state: candidate.state.as_db().to_owned(),
+        payload,
+        created_at: candidate.created_at,
+    })
+}
+
+fn task_to_contract(task: crate::storage::repository::TaskRecord) -> Option<TaskViewV1> {
+    let payload = serde_json::from_slice(&task.payload).ok()?;
+    Some(TaskViewV1 {
+        id: task.id,
+        notice_id: task.notice_id,
+        state: task.state.as_db().to_owned(),
+        payload,
+        created_at: task.created_at,
+        updated_at: task.updated_at,
+    })
+}
+
+fn relation_to_contract(relation: NoticeRelationRecord) -> Option<NoticeRelationViewV1> {
+    let evidence =
+        serde_json::from_slice(&relation.evidence).unwrap_or_else(|_| serde_json::json!({}));
+    Some(NoticeRelationViewV1 {
+        id: relation.id,
+        notice_id: relation.notice_id,
+        related_notice_id: relation.related_notice_id,
+        relation_type: relation.relation_type,
+        relation_state: relation.relation_state,
+        evidence,
+        created_at: relation.created_at,
+    })
+}
+
+fn payload_title(payload: &[u8]) -> Option<String> {
+    serde_json::from_slice::<serde_json::Value>(payload)
+        .ok()?
+        .get("title")?
+        .as_str()
+        .map(str::to_owned)
+}
+
+fn normalize_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| {
+            !character.is_whitespace() && !matches!(character, '，' | ',' | '。' | '.')
+        })
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 fn load_key(

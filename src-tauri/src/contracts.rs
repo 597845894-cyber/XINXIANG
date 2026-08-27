@@ -28,6 +28,20 @@ pub enum CommandName {
     SetNoticeState,
     AnalyzeNotice,
     CancelAnalysis,
+    ListReviewCandidates,
+    EditTaskCandidate,
+    ConfirmTaskCandidate,
+    IgnoreTaskCandidate,
+    MergeTaskCandidates,
+    SplitTaskCandidate,
+    ListTasks,
+    CreateManualTask,
+    UpdateTask,
+    SetTaskState,
+    GetTaskHistory,
+    SuggestNoticeRelations,
+    ListNoticeRelations,
+    ResolveNoticeRelation,
     OpenQuickImport,
     QuitApp,
 }
@@ -129,6 +143,40 @@ pub struct AnalysisProgressV1 {
     pub progress_percent: u8,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CandidateViewV1 {
+    pub id: String,
+    pub notice_id: String,
+    pub analysis_revision_id: String,
+    pub state: String,
+    pub payload: serde_json::Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskViewV1 {
+    pub id: String,
+    pub notice_id: Option<String>,
+    pub state: String,
+    pub payload: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoticeRelationViewV1 {
+    pub id: String,
+    pub notice_id: String,
+    pub related_notice_id: String,
+    pub relation_type: String,
+    pub relation_state: String,
+    pub evidence: serde_json::Value,
+    pub created_at: String,
+}
+
 impl SecurityStatusV1 {
     pub fn verified() -> Self {
         Self {
@@ -183,6 +231,20 @@ impl AppBootstrapV1 {
                 CommandName::SetNoticeState,
                 CommandName::AnalyzeNotice,
                 CommandName::CancelAnalysis,
+                CommandName::ListReviewCandidates,
+                CommandName::EditTaskCandidate,
+                CommandName::ConfirmTaskCandidate,
+                CommandName::IgnoreTaskCandidate,
+                CommandName::MergeTaskCandidates,
+                CommandName::SplitTaskCandidate,
+                CommandName::ListTasks,
+                CommandName::CreateManualTask,
+                CommandName::UpdateTask,
+                CommandName::SetTaskState,
+                CommandName::GetTaskHistory,
+                CommandName::SuggestNoticeRelations,
+                CommandName::ListNoticeRelations,
+                CommandName::ResolveNoticeRelation,
                 CommandName::OpenQuickImport,
                 CommandName::QuitApp,
             ],

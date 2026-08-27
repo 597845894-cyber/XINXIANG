@@ -4,7 +4,7 @@ use rusqlite::{Connection, OpenFlags};
 
 use crate::security::key_protection::MasterKey;
 
-const CURRENT_SCHEMA_VERSION: i64 = 5;
+const CURRENT_SCHEMA_VERSION: i64 = 6;
 
 #[derive(Debug)]
 pub enum DatabaseError {
@@ -118,6 +118,7 @@ fn apply_migrations(connection: &Connection) -> Result<(), DatabaseError> {
             3 => add_attachment_content_nonce(&transaction)?,
             4 => add_notice_capture_fields(&transaction)?,
             5 => add_published_time_candidates(&transaction)?,
+            6 => add_task_management_audit(&transaction)?,
             _ => return Err(DatabaseError::Migration),
         }
         transaction
@@ -251,6 +252,25 @@ fn add_published_time_candidates(
         .execute_batch(
             "ALTER TABLE notices ADD COLUMN published_time_candidate TEXT;
              ALTER TABLE notices ADD COLUMN published_time_candidate_source TEXT;",
+        )
+        .map_err(|_| DatabaseError::Migration)
+}
+
+fn add_task_management_audit(transaction: &rusqlite::Transaction<'_>) -> Result<(), DatabaseError> {
+    transaction
+        .execute_batch(
+            "CREATE TABLE audit_events (
+                id TEXT PRIMARY KEY,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                payload BLOB,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX audit_events_by_entity ON audit_events(entity_type, entity_id, created_at);
+            CREATE INDEX task_revisions_by_task ON task_revisions(task_id, revision_number);
+            CREATE INDEX tasks_by_state ON tasks(task_state, updated_at DESC);
+            ALTER TABLE notice_relations ADD COLUMN evidence BLOB;",
         )
         .map_err(|_| DatabaseError::Migration)
 }

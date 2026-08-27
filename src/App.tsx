@@ -2,7 +2,6 @@ import {
   Bell,
   CalendarDays,
   Check,
-  CheckCircle2,
   ChevronRight,
   ClipboardPaste,
   Clock3,
@@ -23,9 +22,13 @@ import { useEffect, useRef, useState, type ComponentType } from "react";
 import type {
   AnalysisResultV1,
   AppRouteId,
+  CandidateViewV1,
   NoticeDetailV1,
+  NoticeRelationViewV1,
   NoticeState,
   NoticeSummaryV1,
+  TaskCandidatePayloadV1,
+  TaskViewV1,
 } from "./contracts/v1";
 import {
   getNoticeDetail,
@@ -33,12 +36,25 @@ import {
   getSecurityStatus,
   analyzeNotice,
   cancelAnalysis,
+  confirmTaskCandidate,
+  createManualTask,
+  editTaskCandidate,
+  getTaskHistory,
   importImageNotice,
   importTextNotice,
+  ignoreTaskCandidate,
   isDesktopRuntime,
+  listReviewCandidates,
+  listTasks,
   listNotices,
+  mergeTaskCandidates,
   quitDesktopApp,
+  setTaskState,
   setNoticeState,
+  splitTaskCandidate,
+  suggestNoticeRelations,
+  resolveNoticeRelation,
+  updateTask,
   updateNoticePublishedTime,
 } from "./platform/desktop";
 
@@ -734,111 +750,633 @@ function QuickImportView({ imported }: { imported: () => void }) {
   );
 }
 
+const demoCandidatePayload: TaskCandidatePayloadV1 = {
+  title: "完成实验室安全准入考试",
+  startAt: null,
+  dueAt: "2026-08-28T17:00:00Z",
+  dueExpression: "8 月 28 日 17:00 前",
+  location: "线上考试平台",
+  submissionUrl: "https://example.invalid/exam",
+  materials: [],
+  audience: "2026 级本科生",
+  required: true,
+  confidence: 0.56,
+  evidence: ["请于 8 月 28 日 17:00 前完成实验室安全准入考试"],
+  status: "needsReview",
+};
+
+const demoTaskPayload: TaskCandidatePayloadV1 = {
+  ...demoCandidatePayload,
+  confidence: 1,
+  status: "trusted",
+};
+
 function ReviewView() {
+  const [candidates, setCandidates] = useState<CandidateViewV1[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editedTitle, setEditedTitle] = useState("");
+  const [message, setMessage] = useState("");
+  const [relations, setRelations] = useState<NoticeRelationViewV1[]>([]);
+  const selected = candidates.find((candidate) => candidate.id === selectedId) ?? candidates[0];
+
+  async function refresh() {
+    const next = await listReviewCandidates();
+    if (next) setCandidates(next);
+    else if (!candidates.length) {
+      setCandidates([
+        {
+          id: "demo-candidate-1",
+          noticeId: "demo-notice",
+          analysisRevisionId: "demo-revision",
+          state: "pending",
+          payload: demoCandidatePayload,
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: "demo-candidate-2",
+          noticeId: "demo-notice",
+          analysisRevisionId: "demo-revision",
+          state: "pending",
+          payload: {
+            ...demoCandidatePayload,
+            title: "提交报名材料",
+            dueAt: null,
+            dueExpression: null,
+            status: "missing",
+            confidence: 0.48,
+            evidence: ["请提交报名材料"],
+          },
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+    }
+  }
+
+  useEffect(() => {
+    // Loading local candidates updates view state asynchronously.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refresh();
+    // Candidate list is loaded once when entering the review view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    // Keep the editable title aligned with the selected candidate.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEditedTitle(selected?.payload.title ?? "");
+  }, [selectedId, selected]);
+
+  async function editCandidate() {
+    if (!selected || !editedTitle.trim()) return;
+    const payload = { ...selected.payload, title: editedTitle.trim() };
+    try {
+      await editTaskCandidate(selected.id, payload);
+      setCandidates((current) =>
+        current.map((item) => (item.id === selected.id ? { ...item, payload } : item)),
+      );
+      setMessage("候选已保存，原始通知和分析版本仍保留。");
+    } catch {
+      setMessage("候选修改未能保存。");
+    }
+  }
+
+  async function confirmCandidate() {
+    if (!selected) return;
+    try {
+      await confirmTaskCandidate(selected.id, {
+        ...selected.payload,
+        title: editedTitle.trim() || selected.payload.title,
+      });
+      setCandidates((current) => current.filter((item) => item.id !== selected.id));
+      setSelectedId(null);
+      setMessage("已创建正式任务，并记录确认操作。");
+    } catch {
+      setMessage("确认失败，请先补全任务名称。");
+    }
+  }
+
+  async function ignoreCandidate() {
+    if (!selected) return;
+    try {
+      await ignoreTaskCandidate(selected.id);
+      setCandidates((current) => current.filter((item) => item.id !== selected.id));
+      setSelectedId(null);
+      setMessage("候选已忽略，不会重复提示。");
+    } catch {
+      setMessage("忽略操作未能保存。");
+    }
+  }
+
+  async function mergeWithNext() {
+    if (!selected || candidates.length < 2) return;
+    const source = candidates.find((item) => item.id !== selected.id);
+    if (!source) return;
+    try {
+      await mergeTaskCandidates(selected.id, [source.id], {
+        ...selected.payload,
+        title: `${selected.payload.title}（含${source.payload.title}）`,
+      });
+      setCandidates((current) => current.filter((item) => item.id !== source.id));
+      setMessage("候选已合并，保留双方原文依据。");
+    } catch {
+      setMessage("合并失败，请确认候选仍处于待处理状态。");
+    }
+  }
+
+  async function splitSelected() {
+    if (!selected) return;
+    try {
+      await splitTaskCandidate(selected.id, [
+        selected.payload,
+        {
+          ...selected.payload,
+          title: `${selected.payload.title}（后续）`,
+          dueAt: null,
+          dueExpression: null,
+        },
+      ]);
+      setCandidates((current) => current.filter((item) => item.id !== selected.id));
+      setMessage("候选已拆分为两个独立候选。");
+    } catch {
+      setMessage("拆分失败。");
+    }
+  }
+
+  async function suggestRelations() {
+    if (!selected) return;
+    try {
+      const relations = await suggestNoticeRelations(selected.noticeId);
+      setRelations(relations ?? []);
+      setMessage(
+        relations?.length
+          ? `发现 ${relations.length} 条本地关联建议，请在通知详情中确认。`
+          : "暂未发现可确认的重复或更新关系。",
+      );
+    } catch {
+      setMessage("关联建议暂时不可用。");
+    }
+  }
+
+  async function resolveRelation(relation: NoticeRelationViewV1, accepted: boolean) {
+    try {
+      await resolveNoticeRelation(relation.id, accepted);
+      setRelations((current) =>
+        current.map((item) =>
+          item.id === relation.id
+            ? { ...item, relationState: accepted ? "accepted" : "rejected" }
+            : item,
+        ),
+      );
+      setMessage(
+        accepted ? "已接受关联建议，任务不会被静默修改。" : "已拒绝关联建议，现有任务保持不变。",
+      );
+    } catch {
+      setMessage("关联建议处理失败。");
+    }
+  }
+
   return (
     <section className="content-page" aria-labelledby="review-title">
       <div className="page-intro inline-intro">
         <div>
-          <p className="section-eyebrow">2 项待处理</p>
+          <p className="section-eyebrow">{candidates.length} 项待处理</p>
           <h2 id="review-title">核对任务候选</h2>
         </div>
-        <span className="demo-label">演示数据</span>
+        {!isDesktopRuntime() ? <span className="demo-label">浏览器演示数据</span> : null}
       </div>
       <div className="review-table table-shell">
         <div className="table-header">
           <span>任务候选</span>
-          <span>来源</span>
+          <span>来源版本</span>
           <span>可信状态</span>
           <span>截止时间</span>
           <span />
         </div>
-        <div className="table-row">
-          <strong>完成实验室安全准入考试</strong>
-          <span>实验室安全考试通知</span>
-          <span className="status-label warning">时间待核对</span>
-          <time>8 月 28 日 17:00</time>
-          <button className="icon-button subtle" aria-label="打开任务候选" title="打开任务候选">
-            <ChevronRight size={18} />
-          </button>
-        </div>
-        <div className="table-row">
-          <strong>确认秋季学期培养方案</strong>
-          <span>2026 秋季学期选课安排</span>
-          <span className="status-label neutral">缺少截止时间</span>
-          <time>未确定</time>
-          <button className="icon-button subtle" aria-label="打开任务候选" title="打开任务候选">
-            <ChevronRight size={18} />
-          </button>
-        </div>
+        {candidates.length ? (
+          candidates.map((candidate) => (
+            <button
+              className={`table-row ${selected?.id === candidate.id ? "is-selected" : ""}`}
+              key={candidate.id}
+              onClick={() => setSelectedId(candidate.id)}
+              type="button"
+            >
+              <strong>{candidate.payload.title}</strong>
+              <span>
+                {candidate.noticeId} · {candidate.analysisRevisionId}
+              </span>
+              <span
+                className={`status-label ${candidate.payload.status === "trusted" ? "success" : "warning"}`}
+              >
+                {candidate.payload.status === "trusted"
+                  ? "可信"
+                  : candidate.payload.status === "missing"
+                    ? "缺失待补"
+                    : "需要核对"}
+              </span>
+              <time>
+                {candidate.payload.dueAt
+                  ? new Date(candidate.payload.dueAt).toLocaleString()
+                  : "未确定"}
+              </time>
+              <ChevronRight size={18} />
+            </button>
+          ))
+        ) : (
+          <p className="empty-notice">没有待核对候选。导入并分析一条通知后会出现在这里。</p>
+        )}
       </div>
+      {selected ? (
+        <div className="review-detail" aria-label="候选核对详情">
+          <div className="detail-heading">
+            <div>
+              <span className="section-eyebrow">字段依据与操作记录</span>
+              <h3>{selected.payload.title}</h3>
+            </div>
+            <button
+              className="secondary-button"
+              onClick={() => void suggestRelations()}
+              type="button"
+            >
+              查找通知关联
+            </button>
+          </div>
+          <label className="import-input">
+            <span>任务名称</span>
+            <input value={editedTitle} onChange={(event) => setEditedTitle(event.target.value)} />
+          </label>
+          <div className="review-field-grid">
+            <div>
+              <span>截止时间</span>
+              <strong>
+                {selected.payload.dueAt
+                  ? new Date(selected.payload.dueAt).toLocaleString()
+                  : "未确定"}
+              </strong>
+            </div>
+            <div>
+              <span>地点 / 入口</span>
+              <strong>
+                {selected.payload.location ?? selected.payload.submissionUrl ?? "未提取"}
+              </strong>
+            </div>
+            <div>
+              <span>适用对象</span>
+              <strong>{selected.payload.audience ?? "未提取"}</strong>
+            </div>
+            <div>
+              <span>是否必须</span>
+              <strong>
+                {selected.payload.required === null
+                  ? "待确认"
+                  : selected.payload.required
+                    ? "必须完成"
+                    : "自愿参与"}
+              </strong>
+            </div>
+          </div>
+          <div className="evidence-panel">
+            <strong>原文依据</strong>
+            {selected.payload.evidence.map((evidence) => (
+              <p key={evidence}>{evidence}</p>
+            ))}
+          </div>
+          {relations.length ? (
+            <div className="relation-panel" aria-label="通知关联建议">
+              <strong>通知关联建议</strong>
+              {relations.map((relation) => (
+                <div className="relation-row" key={relation.id}>
+                  <span>{relation.relationType}</span>
+                  <small>{JSON.stringify(relation.evidence)}</small>
+                  <span className="status-label neutral">{relation.relationState}</span>
+                  {relation.relationState === "suggested" ? (
+                    <>
+                      <button
+                        className="secondary-button"
+                        onClick={() => void resolveRelation(relation, true)}
+                        type="button"
+                      >
+                        接受
+                      </button>
+                      <button
+                        className="secondary-button"
+                        onClick={() => void resolveRelation(relation, false)}
+                        type="button"
+                      >
+                        拒绝
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <div className="page-actions">
+            <button className="secondary-button" onClick={() => void editCandidate()} type="button">
+              保存修改
+            </button>
+            <button className="secondary-button" onClick={() => void mergeWithNext()} type="button">
+              合并候选
+            </button>
+            <button className="secondary-button" onClick={() => void splitSelected()} type="button">
+              拆分候选
+            </button>
+            <button
+              className="secondary-button"
+              onClick={() => void ignoreCandidate()}
+              type="button"
+            >
+              忽略
+            </button>
+            <button
+              className="primary-button"
+              onClick={() => void confirmCandidate()}
+              type="button"
+            >
+              <Check size={16} />
+              确认创建任务
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {message ? <p className="form-message success">{message}</p> : null}
     </section>
   );
 }
 
 function TasksView() {
-  const filters = [
-    ["今天", "2"],
-    ["本周", "5"],
-    ["即将截止", "3"],
-    ["无确定日期", "1"],
-    ["已完成", "12"],
-    ["全部任务", "18"],
-  ];
+  const filters = ["今天", "本周", "即将截止", "无确定日期", "已完成", "全部任务"];
+  const [filter, setFilter] = useState("本周");
+  const [tasks, setTasks] = useState<TaskViewV1[]>([]);
+  const [message, setMessage] = useState("");
+  const [now] = useState(() => Date.now());
+
+  async function refresh() {
+    const next = await listTasks();
+    if (next) setTasks(next);
+    else if (!tasks.length)
+      setTasks([
+        {
+          id: "demo-task-1",
+          noticeId: "demo-notice",
+          state: "todo",
+          payload: demoTaskPayload,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: "demo-task-2",
+          noticeId: null,
+          state: "todo",
+          payload: {
+            ...demoTaskPayload,
+            title: "确认秋季学期培养方案",
+            dueAt: null,
+            dueExpression: null,
+            status: "missing",
+          },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: "demo-task-3",
+          noticeId: "demo-notice",
+          state: "completed",
+          payload: { ...demoTaskPayload, title: "提交宿舍住宿确认" },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ]);
+  }
+  useEffect(() => {
+    // Load the local task table when entering the view.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refresh();
+    // The task loader intentionally runs once when entering this view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function visible(task: TaskViewV1) {
+    if (filter === "全部任务") return true;
+    if (filter === "已完成") return task.state === "completed";
+    if (task.state !== "todo") return false;
+    if (filter === "无确定日期") return !task.payload.dueAt;
+    if (!task.payload.dueAt) return false;
+    const due = new Date(task.payload.dueAt);
+    const now = new Date();
+    if (filter === "今天") return due.toDateString() === now.toDateString();
+    if (filter === "本周") {
+      const weekStart = new Date(now);
+      const day = weekStart.getDay() || 7;
+      weekStart.setHours(0, 0, 0, 0);
+      weekStart.setDate(weekStart.getDate() - day + 1);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 7);
+      return due >= weekStart && due < weekEnd;
+    }
+    return due.getTime() >= now.getTime() && due.getTime() - now.getTime() < 3 * 86400000;
+  }
+
+  async function toggle(task: TaskViewV1) {
+    const state = task.state === "completed" ? "todo" : "completed";
+    try {
+      await setTaskState(task.id, state, task.payload);
+      setTasks((current) =>
+        current.map((item) => (item.id === task.id ? { ...item, state } : item)),
+      );
+      setMessage(state === "completed" ? "任务已完成，未来提醒将取消。" : "任务已重新打开。");
+    } catch {
+      setMessage("任务状态未能保存。");
+    }
+  }
+
+  async function newTask() {
+    try {
+      const created = await createManualTask({
+        ...demoTaskPayload,
+        title: "新建个人任务",
+        dueAt: null,
+        dueExpression: null,
+      });
+      if (created) setTasks((current) => [created, ...current]);
+      else
+        setTasks((current) => [
+          {
+            id: `demo-${Date.now()}`,
+            noticeId: null,
+            state: "todo",
+            payload: {
+              ...demoTaskPayload,
+              title: "新建个人任务",
+              dueAt: null,
+              dueExpression: null,
+            },
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+          ...current,
+        ]);
+      setMessage("已新增任务，可从详情继续编辑。");
+    } catch {
+      setMessage("新建任务失败。");
+    }
+  }
+
+  async function showHistory(task: TaskViewV1) {
+    try {
+      const history = await getTaskHistory(task.id);
+      setMessage(
+        history ? `该任务有 ${history.length} 个修订版本。` : "浏览器演示数据暂不连接历史记录。",
+      );
+    } catch {
+      setMessage("无法读取任务历史。");
+    }
+  }
+
+  async function editTaskTitle(task: TaskViewV1) {
+    const nextTitle = window.prompt("修改任务名称", task.payload.title)?.trim();
+    if (!nextTitle || nextTitle === task.payload.title) return;
+    const payload = { ...task.payload, title: nextTitle };
+    try {
+      await updateTask(task.id, payload);
+      setTasks((current) =>
+        current.map((item) =>
+          item.id === task.id ? { ...item, payload, updatedAt: new Date().toISOString() } : item,
+        ),
+      );
+      setMessage("任务名称已更新，并保留新的修订记录。");
+    } catch {
+      setMessage("任务修改未能保存。");
+    }
+  }
+
+  async function cancelTask(task: TaskViewV1) {
+    if (task.state === "cancelled") return;
+    try {
+      await setTaskState(task.id, "cancelled", task.payload);
+      setTasks((current) =>
+        current.map((item) => (item.id === task.id ? { ...item, state: "cancelled" } : item)),
+      );
+      setMessage("任务已取消，未来提醒将停止。");
+    } catch {
+      setMessage("任务取消未能保存。");
+    }
+  }
+
   return (
     <section className="content-page" aria-labelledby="tasks-title">
       <div className="page-intro inline-intro">
         <div>
-          <p className="section-eyebrow">本周</p>
+          <p className="section-eyebrow">{filter}</p>
           <h2 id="tasks-title">我的任务</h2>
         </div>
-        <button className="primary-button" type="button">
+        <button className="primary-button" onClick={() => void newTask()} type="button">
           <Plus size={17} /> 新建任务
         </button>
       </div>
       <div className="task-layout">
         <aside className="task-filters" aria-label="任务筛选">
-          {filters.map(([label, count], index) => (
-            <button className={index === 1 ? "is-active" : ""} key={label} type="button">
+          {filters.map((label) => (
+            <button
+              className={filter === label ? "is-active" : ""}
+              key={label}
+              onClick={() => setFilter(label)}
+              type="button"
+            >
               <span>{label}</span>
-              <span>{count}</span>
+              <span>
+                {
+                  tasks.filter(
+                    (task) =>
+                      label === "全部任务" ||
+                      (label === "已完成"
+                        ? task.state === "completed"
+                        : label === "无确定日期"
+                          ? task.state === "todo" && !task.payload.dueAt
+                          : true),
+                  ).length
+                }
+              </span>
             </button>
           ))}
         </aside>
         <div className="task-list">
-          <article className="task-row urgent">
-            <button className="task-check" aria-label="标记完成" type="button" />
-            <div>
-              <h3>完成实验室安全准入考试</h3>
-              <p>
-                <Clock3 size={15} /> 周五 17:00 截止
-              </p>
-            </div>
-            <span className="status-label warning">2 天后</span>
-          </article>
-          <article className="task-row">
-            <button className="task-check" aria-label="标记完成" type="button" />
-            <div>
-              <h3>确认秋季学期培养方案</h3>
-              <p>
-                <CalendarDays size={15} /> 日期待确认
-              </p>
-            </div>
-            <span className="status-label neutral">待安排</span>
-          </article>
-          <article className="task-row complete">
-            <button className="task-check checked" aria-label="重新打开任务" type="button">
-              <Check size={14} />
-            </button>
-            <div>
-              <h3>提交宿舍住宿确认</h3>
-              <p>
-                <CheckCircle2 size={15} /> 今天 08:20 完成
-              </p>
-            </div>
-            <span className="status-label success">已完成</span>
-          </article>
+          {tasks
+            .filter(visible)
+            .sort((left, right) => {
+              if (!left.payload.dueAt) return 1;
+              if (!right.payload.dueAt) return -1;
+              return (
+                new Date(left.payload.dueAt).getTime() - new Date(right.payload.dueAt).getTime()
+              );
+            })
+            .map((task) => {
+              const expired =
+                task.state === "todo" &&
+                task.payload.dueAt &&
+                new Date(task.payload.dueAt).getTime() < now;
+              return (
+                <article
+                  className={`task-row ${expired ? "urgent" : ""} ${task.state === "completed" ? "complete" : ""}`}
+                  key={task.id}
+                >
+                  <button
+                    className={`task-check ${task.state === "completed" ? "checked" : ""}`}
+                    aria-label={task.state === "completed" ? "重新打开任务" : "标记完成"}
+                    onClick={() => void toggle(task)}
+                    type="button"
+                  >
+                    {task.state === "completed" ? <Check size={14} /> : null}
+                  </button>
+                  <div>
+                    <h3>{task.payload.title}</h3>
+                    <p>
+                      {task.payload.dueAt ? (
+                        <>
+                          <Clock3 size={15} /> {new Date(task.payload.dueAt).toLocaleString()} 截止
+                        </>
+                      ) : (
+                        <>
+                          <CalendarDays size={15} /> 日期待确认
+                        </>
+                      )}
+                    </p>
+                  </div>
+                  <div className="task-actions">
+                    <button
+                      className="status-label neutral"
+                      onClick={() => void showHistory(task)}
+                      type="button"
+                    >
+                      {task.state === "completed" ? "已完成" : expired ? "已过期" : "查看历史"}
+                    </button>
+                    {task.state === "todo" ? (
+                      <>
+                        <button
+                          className="status-label neutral"
+                          onClick={() => void editTaskTitle(task)}
+                          type="button"
+                        >
+                          编辑
+                        </button>
+                        <button
+                          className="status-label neutral"
+                          onClick={() => void cancelTask(task)}
+                          type="button"
+                        >
+                          取消
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
+          {!tasks.filter(visible).length ? (
+            <p className="empty-notice">当前视图没有任务。</p>
+          ) : null}
         </div>
       </div>
+      {message ? <p className="form-message success">{message}</p> : null}
     </section>
   );
 }

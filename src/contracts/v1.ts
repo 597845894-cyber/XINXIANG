@@ -16,6 +16,20 @@ export type CommandName =
   | "setNoticeState"
   | "analyzeNotice"
   | "cancelAnalysis"
+  | "listReviewCandidates"
+  | "editTaskCandidate"
+  | "confirmTaskCandidate"
+  | "ignoreTaskCandidate"
+  | "mergeTaskCandidates"
+  | "splitTaskCandidate"
+  | "listTasks"
+  | "createManualTask"
+  | "updateTask"
+  | "setTaskState"
+  | "getTaskHistory"
+  | "suggestNoticeRelations"
+  | "listNoticeRelations"
+  | "resolveNoticeRelation"
   | "openQuickImport"
   | "quitApp";
 
@@ -111,6 +125,34 @@ export interface AnalysisProgressV1 {
   noticeId: string;
   stage: string;
   progressPercent: number;
+}
+
+export interface CandidateViewV1 {
+  id: string;
+  noticeId: string;
+  analysisRevisionId: string;
+  state: "pending" | "confirmed" | "ignored" | "merged";
+  payload: TaskCandidatePayloadV1;
+  createdAt: string;
+}
+
+export interface TaskViewV1 {
+  id: string;
+  noticeId: string | null;
+  state: "todo" | "completed" | "cancelled";
+  payload: TaskCandidatePayloadV1;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NoticeRelationViewV1 {
+  id: string;
+  noticeId: string;
+  relatedNoticeId: string;
+  relationType: "duplicate" | "supplement" | "reschedule" | "cancel";
+  relationState: "suggested" | "accepted" | "rejected";
+  evidence: Record<string, unknown>;
+  createdAt: string;
 }
 
 export type NoticeState =
