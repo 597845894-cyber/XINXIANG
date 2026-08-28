@@ -30,4 +30,13 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: /上传截图/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /粘贴剪贴板图片/ })).not.toBeInTheDocument();
   });
+
+  it("shows independent candidate evidence in the review workspace", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /任务核对/ }));
+
+    expect(await screen.findByRole("heading", { name: "核对任务候选" })).toBeInTheDocument();
+    expect(screen.getByText(/请于 8 月 28 日 17:00 前完成实验室安全准入考试/)).toBeInTheDocument();
+    expect(screen.getByText("提交报名材料")).toBeInTheDocument();
+  });
 });

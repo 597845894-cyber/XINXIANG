@@ -35,6 +35,7 @@ import type {
 import {
   getNoticeDetail,
   getSecurityStatus,
+  getModelResourceStatus,
   analyzeNotice,
   cancelAnalysis,
   confirmTaskCandidate,
@@ -172,7 +173,7 @@ function AppHeader({
   );
 }
 
-function InboxView({ openImport }: { openImport: () => void }) {
+function InboxView({ openImport, openTasks }: { openImport: () => void; openTasks: () => void }) {
   const [filter, setFilter] = useState<NoticeState | "all">("all");
   const [notices, setNotices] = useState<NoticeSummaryV1[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -182,6 +183,10 @@ function InboxView({ openImport }: { openImport: () => void }) {
   const [sourceOpen, setSourceOpen] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResultV1 | null>(null);
   const [analysisState, setAnalysisState] = useState<"idle" | "running" | "failed">("idle");
+  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [modelStatus, setModelStatus] = useState<"available" | "missing" | "corrupt" | "unknown">(
+    "unknown",
+  );
   const [revisions, setRevisions] = useState<AnalysisRevisionViewV1[]>([]);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [deleteMode, setDeleteMode] = useState<"cascade" | "keepTasks" | null>(null);
@@ -221,6 +226,25 @@ function InboxView({ openImport }: { openImport: () => void }) {
     void listAnalysisRevisions(selectedId)
       .then((next) => setRevisions(next ?? []))
       .catch(() => setRevisions([]));
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!isDesktopRuntime()) return;
+    void getModelResourceStatus()
+      .then((status) => setModelStatus(status?.state ?? "unknown"))
+      .catch(() => setModelStatus("unknown"));
+    let stop: (() => void) | undefined;
+    void import("@tauri-apps/api/event").then(async ({ listen }) => {
+      stop = await listen<{ noticeId: string; progressPercent: number }>(
+        "analysisProgress",
+        (event) => {
+          if (event.payload.noticeId === selectedId) {
+            setAnalysisProgress(event.payload.progressPercent);
+          }
+        },
+      );
+    });
+    return () => stop?.();
   }, [selectedId]);
 
   async function openSource() {
@@ -288,6 +312,7 @@ function InboxView({ openImport }: { openImport: () => void }) {
   async function runAnalysis(manualText?: string) {
     if (!detail) return;
     setAnalysisState("running");
+    setAnalysisProgress(0);
     setError("");
     try {
       const result = await analyzeNotice(detail.id, manualText);
@@ -303,11 +328,10 @@ function InboxView({ openImport }: { openImport: () => void }) {
         );
       }
       setAnalysisState("idle");
+      setAnalysisProgress(100);
     } catch {
       setAnalysisState("failed");
-      setError(
-      "本地分析未完成，请稍后重试。",
-      );
+      setError("本地分析未完成，请稍后重试。");
     }
   }
 
@@ -418,7 +442,14 @@ function InboxView({ openImport }: { openImport: () => void }) {
                         ? "分析完成，等待核对"
                         : "等待本地分析"}
                 </strong>
-                <span>原始内容已加密保存，分析结果会生成新的版本。</span>
+                <span>
+                  {modelStatus === "available"
+                    ? "本地千问可用，通知原文不会离开设备。"
+                    : modelStatus === "unknown"
+                      ? "正在检查本地千问资源..."
+                      : "本地千问资源不可用，将使用低可信规则回退。"}
+                  {analysisState === "running" ? ` · ${analysisProgress}%` : ""}
+                </span>
               </div>
               {!analysis && detail.inboxState !== "processed" ? (
                 <button
@@ -482,6 +513,13 @@ function InboxView({ openImport }: { openImport: () => void }) {
                   <span>{Math.round(analysis.categoryConfidence * 100)}% 可信</span>
                 </div>
                 <pre className="normalized-text">{analysis.normalizedText}</pre>
+                {analysis.warnings.length ? (
+                  <div className="analysis-warnings" role="status">
+                    {analysis.warnings.map((warning) => (
+                      <p key={warning}>{warning}</p>
+                    ))}
+                  </div>
+                ) : null}
                 {analysis.candidates.length ? (
                   <div className="candidate-list">
                     {analysis.candidates.map((candidate) => (
@@ -496,12 +534,25 @@ function InboxView({ openImport }: { openImport: () => void }) {
                             : "时间待确认"}
                         </span>
                         <em>{candidate.status === "trusted" ? "可快速核对" : "需要核对"}</em>
+                        {candidate.evidence.length ? (
+                          <small className="candidate-evidence">
+                            依据：{candidate.evidence.join("；")}
+                          </small>
+                        ) : null}
                       </article>
                     ))}
                   </div>
                 ) : (
                   <p className="source-meta">未生成任务候选，可标记为仅供知晓。</p>
                 )}
+              </div>
+            ) : null}
+            {analysisState === "failed" ? (
+              <div className="analysis-recovery" role="status">
+                <span>分析失败不会创建半成品任务。可以重试，或直接手工建立任务。</span>
+                <button className="secondary-button" onClick={openTasks} type="button">
+                  去任务表手工创建
+                </button>
               </div>
             ) : null}
             <div className="capture-details">
@@ -542,9 +593,7 @@ function InboxView({ openImport }: { openImport: () => void }) {
                 </div>
               ) : null}
               {detail.sourceAsset ? (
-                <p className="source-meta">
-                  历史图片记录仅保留，不会在文字版中读取或显示。
-                </p>
+                <p className="source-meta">历史图片记录仅保留，不会在文字版中读取或显示。</p>
               ) : (
                 <p className="source-meta">文字原文已加密保存于本地数据库。</p>
               )}
@@ -576,7 +625,7 @@ function InboxView({ openImport }: { openImport: () => void }) {
         {sourceOpen && detail ? (
           <div className="source-dialog" role="dialog" aria-modal="true" aria-label="原始通知">
             <div className="source-dialog-content">
-                  <div className="detail-heading">
+              <div className="detail-heading">
                 <h2>原始通知</h2>
                 <button
                   className="icon-button"
@@ -592,7 +641,9 @@ function InboxView({ openImport }: { openImport: () => void }) {
               {detail.originalText ? (
                 <pre className="original-text">{detail.originalText}</pre>
               ) : null}
-              {!detail.originalText ? <p>这是一条历史图片记录；文字版不读取或显示图片内容。</p> : null}
+              {!detail.originalText ? (
+                <p>这是一条历史图片记录；文字版不读取或显示图片内容。</p>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -715,13 +766,13 @@ function QuickImportView({ imported }: { imported: () => void }) {
       </div>
       <div className="import-workspace">
         <label className="import-input">
-            <span>通知原文</span>
-            <textarea
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              placeholder="在此粘贴通知文字"
-              rows={10}
-            />
+          <span>通知原文</span>
+          <textarea
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            placeholder="在此粘贴通知文字"
+            rows={10}
+          />
         </label>
         <div className="import-options">
           <label>
@@ -1437,7 +1488,9 @@ function TasksView() {
                 <div className="task-source-detail">
                   <strong>原始通知</strong>
                   {sourceDetail.originalText ? <p>{sourceDetail.originalText}</p> : null}
-                  {!sourceDetail.originalText ? <p>该来源为历史图片记录，文字版不会读取图片内容。</p> : null}
+                  {!sourceDetail.originalText ? (
+                    <p>该来源为历史图片记录，文字版不会读取图片内容。</p>
+                  ) : null}
                 </div>
               ) : null}
             </section>
@@ -1801,16 +1854,18 @@ function ActiveView({
   route,
   imported,
   openImport,
+  openTasks,
 }: {
   route: AppRouteId;
   imported: () => void;
   openImport: () => void;
+  openTasks: () => void;
 }) {
   if (route === "quickImport") return <QuickImportView imported={imported} />;
   if (route === "review") return <ReviewView />;
   if (route === "tasks") return <TasksView />;
   if (route === "settings") return <SettingsView />;
-  return <InboxView openImport={openImport} />;
+  return <InboxView openImport={openImport} openTasks={openTasks} />;
 }
 
 export function App() {
@@ -1925,6 +1980,7 @@ export function App() {
           route={activeRoute}
           imported={() => setActiveRoute("inbox")}
           openImport={() => setActiveRoute("quickImport")}
+          openTasks={() => setActiveRoute("tasks")}
         />
       </main>
     </div>

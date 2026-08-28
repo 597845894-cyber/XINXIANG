@@ -15,6 +15,13 @@ $env:TEMP = Join-Path $buildRoot 'temp'
 $env:TMP = $env:TEMP
 New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
 
+# openssl-src requires Perl on Windows; reuse an existing installation when
+# available instead of downloading or installing another toolchain.
+$perlBin = 'C:\Strawberry\perl\bin'
+if (Test-Path (Join-Path $perlBin 'perl.exe')) {
+  $env:Path = "$perlBin;$env:Path"
+}
+
 if ($Action -eq 'Format') {
   $rustfmt = Join-Path $defaultBin 'rustfmt.exe'
   $sources = Get-ChildItem (Join-Path $PSScriptRoot '..\src-tauri\src') -Filter '*.rs' -Recurse | ForEach-Object FullName

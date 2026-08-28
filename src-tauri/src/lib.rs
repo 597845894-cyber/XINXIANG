@@ -17,7 +17,11 @@ use model_resources::{
     inspect_resources, install_resources, install_root, selected_manifest, ModelResourceStatusV1,
 };
 use std::collections::HashSet;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex, OnceLock,
+};
+use std::{thread, time::Duration};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -313,7 +317,51 @@ fn analyze_notice(
     let result = match input {
         capture::AnalysisInput::Text(text) => {
             emit_progress("本地文字分析", 65);
-            understanding::analyze_text(&text, &published_at, revision_id.clone())
+            let cancellation = Arc::new(AtomicBool::new(false));
+            let monitor_signal = cancellation.clone();
+            let monitor_notice = notice_id.clone();
+            let monitor = thread::spawn(move || {
+                while !monitor_signal.load(Ordering::Relaxed) {
+                    if is_analysis_cancelled(&monitor_notice) {
+                        monitor_signal.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(25));
+                }
+            });
+            let model_result = selected_manifest().ok().and_then(|manifest| {
+                let root = install_root(&manifest.selection_id);
+                (inspect_resources(&root, &manifest).state
+                    == model_resources::ModelResourceState::Available)
+                    .then(|| {
+                        let adapter = local_inference::LocalInferenceAdapter::from_root(root);
+                        let prompt = understanding::build_model_prompt(
+                            &text,
+                            &published_at,
+                            "Asia/Shanghai",
+                        );
+                        adapter.analyze(&prompt, Duration::from_secs(90), cancellation.clone())
+                    })
+            });
+            cancellation.store(true, Ordering::Relaxed);
+            let _ = monitor.join();
+            match model_result {
+                Some(Ok(raw)) => understanding::analyze_text_with_model_output(
+                    &text,
+                    &published_at,
+                    revision_id.clone(),
+                    &raw,
+                )
+                .or_else(|_| {
+                    understanding::analyze_text(&text, &published_at, revision_id.clone())
+                }),
+                Some(Err(local_inference::LocalInferenceError::Cancelled))
+                    if is_analysis_cancelled(&notice_id) =>
+                {
+                    Err(understanding::UnderstandingError::ModelCancelled)
+                }
+                _ => understanding::analyze_text(&text, &published_at, revision_id.clone()),
+            }
         }
     };
     let result = match result {

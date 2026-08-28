@@ -188,14 +188,15 @@ pub fn analyze_text(
     let semantic_json = serde_json::json!({ "category": category });
     let _semantic_output = parse_model_output(&semantic_json.to_string())?;
     let mut warnings = rules.warnings;
+    warnings.push("本地千问不可用或输出未通过校验，已使用规则回退；结果可信度较低。".to_owned());
     let mut candidates = rules.candidates;
     if category == "informationOnly" {
         candidates.clear();
     }
     let category_confidence = if category == "pendingReview" {
-        0.45
+        0.35
     } else {
-        0.86
+        0.58
     };
     let requires_review = category_confidence < 0.75
         || candidates
@@ -216,6 +217,93 @@ pub fn analyze_text(
         warnings,
         requires_review,
     })
+}
+
+pub fn analyze_text_with_model_output(
+    text: &str,
+    published_at: &str,
+    revision_id: String,
+    raw_model_output: &str,
+) -> Result<AnalysisResultV1, UnderstandingError> {
+    let normalized = normalize_text(text);
+    if normalized.is_empty() {
+        return Err(UnderstandingError::TextRequired);
+    }
+    let model = parse_structured_model_output(raw_model_output)?;
+    let rules = extract_rules(&normalized, published_at)?;
+    let category = model_category(&model.category);
+    let mut warnings = model.uncertainties.clone();
+    let mut candidates = Vec::new();
+    for task in model.tasks {
+        if task
+            .evidence
+            .iter()
+            .any(|evidence| !normalized.contains(evidence))
+        {
+            return Err(UnderstandingError::InvalidModelOutput);
+        }
+        let expression = task.time_expression.clone();
+        let due_at = expression.as_deref().and_then(|value| {
+            resolve_relative(value, published_at)
+                .ok()
+                .or_else(|| resolve_absolute(value, published_at).ok())
+                .map(|resolved| apply_time(resolved, find_time(value).as_deref()))
+        });
+        let status = if due_at.is_none() && expression.is_some() {
+            warnings.push(format!("任务“{}”的时间表达需要核对", task.title));
+            "needsReview"
+        } else if task.required.is_none() || task.audience.is_none() {
+            "missing"
+        } else {
+            "trusted"
+        };
+        candidates.push(TaskCandidatePayloadV1 {
+            title: task.title,
+            start_at: None,
+            due_at,
+            due_expression: expression,
+            location: task.location_or_entry,
+            submission_url: rules
+                .fields
+                .iter()
+                .find(|field| field.name == "submissionUrl")
+                .and_then(|field| field.value.clone()),
+            materials: task.materials,
+            audience: task.audience,
+            required: task.required,
+            confidence: if status == "trusted" { 0.9 } else { 0.55 },
+            evidence: task.evidence,
+            status: status.to_owned(),
+        });
+    }
+    let requires_review = !warnings.is_empty()
+        || candidates
+            .iter()
+            .any(|candidate| candidate.status != "trusted")
+        || model.change_intent != "none";
+    Ok(AnalysisResultV1 {
+        schema_version: ANALYSIS_SCHEMA_VERSION,
+        revision_id,
+        classifier_version: format!("qwen-{}-v{}", MODEL_PROMPT_VERSION, ANALYSIS_SCHEMA_VERSION),
+        normalized_text: normalized,
+        category,
+        category_confidence: if requires_review { 0.7 } else { 0.92 },
+        fields: rules.fields,
+        candidates,
+        warnings,
+        requires_review,
+    })
+}
+
+fn model_category(category: &str) -> String {
+    match category {
+        "required-action" => "mustComplete",
+        "schedule" => "schedule",
+        "voluntary" => "optional",
+        "result-or-change" => "resultOrChange",
+        _ => "informationOnly",
+    }
+    .to_owned()
 }
 
 struct RuleExtraction {
@@ -783,8 +871,8 @@ fn days_in_month(year: i32, month: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        analyze_text, normalize_text, parse_model_output, parse_structured_model_output,
-        resolve_absolute, resolve_relative, UnderstandingError,
+        analyze_text, analyze_text_with_model_output, normalize_text, parse_model_output,
+        parse_structured_model_output, resolve_absolute, resolve_relative, UnderstandingError,
     };
 
     #[test]
@@ -846,6 +934,38 @@ mod tests {
             r#"{"category":"required-action","changeIntent":"none","tasks":[{"title":"提交报名","timeExpression":null,"locationOrEntry":null,"materials":[],"audience":null,"required":true,"evidence":[]}],"uncertainties":[]}"#
         )
         .is_err());
+    }
+
+    #[test]
+    fn structured_model_output_is_mapped_to_independent_candidates_with_resolved_dates() {
+        let raw = r#"{"category":"required-action","changeIntent":"none","tasks":[{"title":"提交报名","timeExpression":"明天前","locationOrEntry":"线上表单","materials":["报名表"],"audience":"全体学生","required":true,"evidence":["请提交报名"]},{"title":"参加说明会","timeExpression":null,"locationOrEntry":"报告厅","materials":[],"audience":"报名学生","required":true,"evidence":["参加说明会"]}],"uncertainties":[]}"#;
+        let result = analyze_text_with_model_output(
+            "请提交报名，参加说明会",
+            "2026-08-28T09:00:00Z",
+            "revision-model".to_owned(),
+            raw,
+        )
+        .unwrap();
+        assert_eq!(result.candidates.len(), 2);
+        assert_eq!(
+            result.candidates[0].due_at.as_deref(),
+            Some("2026-08-29T23:59:00Z")
+        );
+        assert_eq!(result.candidates[1].title, "参加说明会");
+    }
+
+    #[test]
+    fn model_evidence_must_be_present_in_original_text() {
+        let raw = r#"{"category":"required-action","changeIntent":"none","tasks":[{"title":"提交报名","timeExpression":null,"locationOrEntry":null,"materials":[],"audience":null,"required":true,"evidence":["原文没有这句话"]}],"uncertainties":[]}"#;
+        assert!(matches!(
+            analyze_text_with_model_output(
+                "请提交报名",
+                "2026-08-28T09:00:00Z",
+                "revision-invalid".to_owned(),
+                raw,
+            ),
+            Err(UnderstandingError::InvalidModelOutput)
+        ));
     }
 
     #[test]

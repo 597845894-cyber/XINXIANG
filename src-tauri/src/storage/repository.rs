@@ -1540,6 +1540,45 @@ mod tests {
     }
 
     #[test]
+    fn confirms_three_stage_notice_candidates_independently_with_audit_rows() {
+        let database = database();
+        let repository = NoticeRepository::new(database.connection());
+        repository.create_notice("notice-three-stage", "报名、提交材料、参加活动").unwrap();
+        repository
+            .save_analysis_revision_full(
+                "notice-three-stage",
+                "analysis-three-stage",
+                "qwen-v1",
+                Some("报名、提交材料、参加活动"),
+                &[
+                    NewCandidate { id: "candidate-signup", payload: br#"{"title":"报名"}"# },
+                    NewCandidate { id: "candidate-materials", payload: br#"{"title":"提交材料"}"# },
+                    NewCandidate { id: "candidate-event", payload: br#"{"title":"参加活动"}"# },
+                ],
+            )
+            .unwrap();
+
+        for (candidate, task, revision) in [
+            ("candidate-signup", "task-signup", "task-revision-signup"),
+            ("candidate-materials", "task-materials", "task-revision-materials"),
+            ("candidate-event", "task-event", "task-revision-event"),
+        ] {
+            repository.confirm_candidate(candidate, task, revision, br#"{}"#).unwrap();
+        }
+
+        let task_count: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM tasks WHERE notice_id = 'notice-three-stage'", [], |row| row.get(0))
+            .unwrap();
+        let audit_count: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM audit_log WHERE entity_type = 'candidate' AND action = 'confirmed'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(task_count, 3);
+        assert_eq!(audit_count, 3);
+    }
+
+    #[test]
     fn reanalysis_creates_a_new_revision_without_overwriting_the_previous_one() {
         let database = database();
         let repository = NoticeRepository::new(database.connection());

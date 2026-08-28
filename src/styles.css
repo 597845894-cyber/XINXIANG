@@ -621,6 +621,34 @@ button {
 .candidate-card em {
   font-style: normal;
 }
+
+.candidate-evidence {
+  flex-basis: 100%;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.analysis-warnings,
+.analysis-recovery {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+.analysis-warnings p,
+.analysis-recovery span {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.analysis-recovery {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
 .analysis-state strong,
 .analysis-state span {
   display: block;
