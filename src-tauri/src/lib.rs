@@ -1,6 +1,7 @@
 mod backup;
 mod capture;
 mod contracts;
+pub mod local_inference;
 mod model_resources;
 pub mod observability;
 pub mod security;

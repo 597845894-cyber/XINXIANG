@@ -166,7 +166,7 @@ async function main() {
       runtimeDiagnostics: run.stderr.slice(-2000),
     });
     await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
-    process.stdout.write(`${basename(modelPath)}: ${report.samples.length}/10 ${sample.id}\n`);
+    process.stdout.write(`${basename(modelPath)}: ${report.samples.length}/${(await readJson(join(repoRoot, "benchmarks/dataset/manifest.json"))).samples.length} ${sample.id}\n`);
   }
 }
 

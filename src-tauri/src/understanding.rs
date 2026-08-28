@@ -70,6 +70,56 @@ impl std::fmt::Display for UnderstandingError {
 impl std::error::Error for UnderstandingError {}
 
 pub const ANALYSIS_SCHEMA_VERSION: u16 = 1;
+pub const MODEL_PROMPT_VERSION: &str = "campus-notice-semantic-v1";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StructuredModelTaskV1 {
+    pub title: String,
+    pub time_expression: Option<String>,
+    pub location_or_entry: Option<String>,
+    pub materials: Vec<String>,
+    pub audience: Option<String>,
+    pub required: Option<bool>,
+    pub evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StructuredModelOutputV1 {
+    pub category: String,
+    pub change_intent: String,
+    pub tasks: Vec<StructuredModelTaskV1>,
+    pub uncertainties: Vec<String>,
+}
+
+pub fn build_model_prompt(text: &str, published_at: &str, timezone: &str) -> String {
+    format!(
+        "提示词版本: {MODEL_PROMPT_VERSION}\n通知发布时间: {published_at}\n时区: {timezone}\n通知原文:\n{text}"
+    )
+}
+
+pub fn parse_structured_model_output(
+    raw: &str,
+) -> Result<StructuredModelOutputV1, UnderstandingError> {
+    let output: StructuredModelOutputV1 =
+        serde_json::from_str(raw).map_err(|_| UnderstandingError::InvalidModelOutput)?;
+    if !matches!(
+        output.category.as_str(),
+        "required-action" | "schedule" | "voluntary" | "result-or-change" | "information-only"
+    ) || !matches!(
+        output.change_intent.as_str(),
+        "none" | "reschedule" | "cancel"
+    ) || output.tasks.len() > 5
+        || output
+            .tasks
+            .iter()
+            .any(|task| task.title.trim().is_empty() || task.evidence.is_empty())
+    {
+        return Err(UnderstandingError::InvalidModelOutput);
+    }
+    Ok(output)
+}
 
 pub fn normalize_text(input: &str) -> String {
     let mut output = String::with_capacity(input.len());
@@ -733,8 +783,8 @@ fn days_in_month(year: i32, month: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        analyze_text, normalize_text, parse_model_output, resolve_absolute, resolve_relative,
-        UnderstandingError,
+        analyze_text, normalize_text, parse_model_output, parse_structured_model_output,
+        resolve_absolute, resolve_relative, UnderstandingError,
     };
 
     #[test]
@@ -782,6 +832,20 @@ mod tests {
             Err(UnderstandingError::ModelTimeout)
         ));
         assert!(parse_model_output(r#"{"category":"mustComplete"}"#).is_ok());
+    }
+
+    #[test]
+    fn structured_model_contract_rejects_unknown_fields_and_missing_evidence() {
+        let valid = r#"{"category":"required-action","changeIntent":"none","tasks":[{"title":"提交报名","timeExpression":null,"locationOrEntry":null,"materials":[],"audience":null,"required":true,"evidence":["提交报名"]}],"uncertainties":[]}"#;
+        assert!(parse_structured_model_output(valid).is_ok());
+        assert!(parse_structured_model_output(
+            r#"{"category":"required-action","changeIntent":"none","tasks":[],"uncertainties":[],"unexpected":true}"#
+        )
+        .is_err());
+        assert!(parse_structured_model_output(
+            r#"{"category":"required-action","changeIntent":"none","tasks":[{"title":"提交报名","timeExpression":null,"locationOrEntry":null,"materials":[],"audience":null,"required":true,"evidence":[]}],"uncertainties":[]}"#
+        )
+        .is_err());
     }
 
     #[test]
