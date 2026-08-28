@@ -107,6 +107,13 @@ fn sha256_file(path: &Path) -> io::Result<String> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
+fn runtime_archive_is_readable(path: &Path) -> io::Result<bool> {
+    let mut file = File::open(path)?;
+    let mut signature = [0_u8; 4];
+    let read = file.read(&mut signature)?;
+    Ok(read == signature.len() && signature == [0x50, 0x4b, 0x03, 0x04])
+}
+
 pub fn inspect_resources(
     root: &Path,
     manifest: &ModelSelectionManifestV1,
@@ -136,6 +143,16 @@ pub fn inspect_resources(
                     resource_id: component.resource_id.clone(),
                     path: expected.path.clone(),
                     reason: "size-or-sha256-mismatch".to_owned(),
+                });
+            } else if component.kind == "runtime"
+                && expected.path.to_ascii_lowercase().ends_with(".zip")
+                && !runtime_archive_is_readable(&path).unwrap_or(false)
+            {
+                has_corrupt_file = true;
+                issues.push(ModelResourceIssueV1 {
+                    resource_id: component.resource_id.clone(),
+                    path: expected.path.clone(),
+                    reason: "runtime-archive-invalid".to_owned(),
                 });
             }
         }
@@ -252,6 +269,22 @@ mod tests {
         }
     }
 
+    fn runtime_fixture_manifest(content: &[u8]) -> ModelSelectionManifestV1 {
+        ModelSelectionManifestV1 {
+            schema_version: 1,
+            selection_id: "runtime-fixture-v1".to_owned(),
+            components: vec![ModelComponentV1 {
+                resource_id: "fixture.runtime".to_owned(),
+                kind: "runtime".to_owned(),
+                files: vec![ModelFileV1 {
+                    path: "runtime/llama.zip".to_owned(),
+                    size: content.len() as u64,
+                    sha256: format!("{:x}", Sha256::digest(content)),
+                }],
+            }],
+        }
+    }
+
     #[test]
     fn distinguishes_missing_corrupt_and_available_resources() {
         let directory = tempdir().unwrap();
@@ -325,6 +358,33 @@ mod tests {
         assert_eq!(
             install_root("fixture-v1"),
             std::path::PathBuf::from(r"E:\University\校园信箱\local-models").join("fixture-v1")
+        );
+    }
+
+    #[test]
+    fn rejects_a_runtime_file_with_a_non_zip_signature() {
+        let directory = tempdir().unwrap();
+        let content = b"not-a-zip";
+        let manifest = runtime_fixture_manifest(content);
+        let runtime = directory.path().join("runtime/llama.zip");
+        fs::create_dir_all(runtime.parent().unwrap()).unwrap();
+        fs::write(&runtime, content).unwrap();
+        let status = inspect_resources(directory.path(), &manifest);
+        assert_eq!(status.state, ModelResourceState::Corrupt);
+        assert_eq!(status.issues[0].reason, "runtime-archive-invalid");
+    }
+
+    #[test]
+    fn accepts_a_runtime_file_with_a_zip_signature() {
+        let directory = tempdir().unwrap();
+        let content = [0x50, 0x4b, 0x03, 0x04, 0_u8];
+        let manifest = runtime_fixture_manifest(&content);
+        let runtime = directory.path().join("runtime/llama.zip");
+        fs::create_dir_all(runtime.parent().unwrap()).unwrap();
+        fs::write(&runtime, content).unwrap();
+        assert_eq!(
+            inspect_resources(directory.path(), &manifest).state,
+            ModelResourceState::Available
         );
     }
 }

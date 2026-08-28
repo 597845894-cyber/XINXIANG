@@ -1010,10 +1010,10 @@ mod tests {
         let directory = tempdir().unwrap();
         assert!(matches!(
             import_image(
-            directory.path(),
-            b"image bytes must never be inspected".to_vec(),
-            Some("image/png".to_owned()),
-            "2026-08-27T09:00:00Z".to_owned(),
+                directory.path(),
+                b"image bytes must never be inspected".to_vec(),
+                Some("image/png".to_owned()),
+                "2026-08-27T09:00:00Z".to_owned(),
             ),
             Err(CaptureError::ImageImportNotSupported)
         ));

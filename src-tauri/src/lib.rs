@@ -9,8 +9,8 @@ mod understanding;
 
 use contracts::{
     AnalysisProgressV1, AnalysisRevisionViewV1, AppBootstrapV1, BackupSummaryV1, CandidateViewV1,
-    NoticeDetailV1, NoticeRelationViewV1, NoticeStateV1, NoticeSummaryV1,
-    NotificationEventV1, ReminderViewV1, SecurityStatusV1, TaskRevisionViewV1, TaskViewV1,
+    NoticeDetailV1, NoticeRelationViewV1, NoticeStateV1, NoticeSummaryV1, NotificationEventV1,
+    ReminderViewV1, SecurityStatusV1, TaskRevisionViewV1, TaskViewV1,
 };
 use model_resources::{
     inspect_resources, install_resources, install_root, selected_manifest, ModelResourceStatusV1,
