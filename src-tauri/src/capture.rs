@@ -1,13 +1,12 @@
-use std::{io::Cursor, path::Path};
+use std::path::Path;
 
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
     backup::{self, BackupSummary},
     contracts::{
-        AnalysisRevisionViewV1, BackupSummaryV1, CandidateViewV1, ImagePreviewV1, NoticeDetailV1,
+        AnalysisRevisionViewV1, BackupSummaryV1, CandidateViewV1, NoticeDetailV1,
         NoticeRelationViewV1, NoticeStateV1, NoticeSummaryV1, ReminderViewV1, SourceAssetInfoV1,
         TaskRevisionViewV1, TaskViewV1,
     },
@@ -17,30 +16,16 @@ use crate::{
         database::EncryptedDatabase,
         repository::{
             CandidateState, NewCandidate, NoticeDetail, NoticeRelationRecord, NoticeRepository,
-            NoticeState, NoticeSummary, PublishedTimeCandidate, ReminderRecord, SourceAsset,
-            TaskState,
+            NoticeState, NoticeSummary, ReminderRecord, TaskState,
         },
     },
 };
-
-const MAX_IMAGE_BYTES: usize = 15 * 1024 * 1024;
-const MAX_IMAGE_PIXELS: u64 = 40_000_000;
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ImageValidationV1 {
-    pub media_type: String,
-    pub pixel_width: u32,
-    pub pixel_height: u32,
-}
 
 #[derive(Debug)]
 pub enum CaptureError {
     EmptyText,
     InvalidPublishedTime,
-    ImageTooLarge,
-    UnsupportedImage,
-    InvalidImage,
+    ImageImportNotSupported,
     Storage,
     MissingNotice,
     InvalidPayload,
@@ -51,9 +36,7 @@ impl std::fmt::Display for CaptureError {
         let code = match self {
             Self::EmptyText => "NOTICE_TEXT_REQUIRED",
             Self::InvalidPublishedTime => "NOTICE_PUBLISHED_TIME_INVALID",
-            Self::ImageTooLarge => "NOTICE_IMAGE_TOO_LARGE",
-            Self::UnsupportedImage => "NOTICE_IMAGE_UNSUPPORTED",
-            Self::InvalidImage => "NOTICE_IMAGE_INVALID",
+            Self::ImageImportNotSupported => "NOTICE_IMAGE_IMPORT_NOT_SUPPORTED",
             Self::Storage => "NOTICE_STORAGE_FAILED",
             Self::MissingNotice => "NOTICE_NOT_FOUND",
             Self::InvalidPayload => "TASK_PAYLOAD_INVALID",
@@ -82,69 +65,13 @@ pub fn import_text(
     summary_for(&repository, &notice_id)
 }
 
-pub fn validate_image(
-    bytes: &[u8],
-    declared_media_type: Option<&str>,
-) -> Result<ImageValidationV1, CaptureError> {
-    if bytes.len() > MAX_IMAGE_BYTES {
-        return Err(CaptureError::ImageTooLarge);
-    }
-    if bytes.is_empty() {
-        return Err(CaptureError::InvalidImage);
-    }
-    let (media_type, width, height) = image_dimensions(bytes)?;
-    if let Some(declared) = declared_media_type.filter(|value| !value.is_empty()) {
-        if declared != media_type {
-            return Err(CaptureError::UnsupportedImage);
-        }
-    }
-    if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
-        return Err(CaptureError::InvalidImage);
-    }
-    Ok(ImageValidationV1 {
-        media_type: media_type.to_owned(),
-        pixel_width: width,
-        pixel_height: height,
-    })
-}
-
 pub fn import_image(
-    app_data_directory: &Path,
-    bytes: Vec<u8>,
-    declared_media_type: Option<String>,
-    published_at: String,
+    _app_data_directory: &Path,
+    _bytes: Vec<u8>,
+    _declared_media_type: Option<String>,
+    _published_at: String,
 ) -> Result<NoticeSummaryV1, CaptureError> {
-    validate_published_time(&published_at)?;
-    let validation = validate_image(&bytes, declared_media_type.as_deref())?;
-    let time_candidate = extract_published_time_candidate(&bytes);
-    let byte_size = bytes.len();
-    let master_key = load_key(app_data_directory)?;
-    let database = EncryptedDatabase::open(&app_data_directory.join("inbox.db"), &master_key)
-        .map_err(|_| CaptureError::Storage)?;
-    let notice_id = new_id();
-    let asset_id = new_id();
-    let store = AttachmentStore::new(app_data_directory.join("attachments"));
-    let metadata = store
-        .write_from_reader(&asset_id, &mut Cursor::new(bytes), &master_key)
-        .map_err(|_| CaptureError::Storage)?;
-    let asset = SourceAsset {
-        id: asset_id.clone(),
-        media_type: validation.media_type,
-        encrypted_file_name: format!("{asset_id}.enc"),
-        metadata,
-        byte_size,
-        pixel_width: Some(validation.pixel_width),
-        pixel_height: Some(validation.pixel_height),
-    };
-    let repository = NoticeRepository::new(database.connection());
-    if repository
-        .create_image_notice(&notice_id, &published_at, time_candidate.as_ref(), &asset)
-        .is_err()
-    {
-        let _ = store.remove(&asset_id);
-        return Err(CaptureError::Storage);
-    }
-    summary_for(&repository, &notice_id)
+    Err(CaptureError::ImageImportNotSupported)
 }
 
 pub fn list_notices(
@@ -198,27 +125,6 @@ pub fn list_analysis_revisions(
         .collect())
 }
 
-pub fn image_preview(
-    app_data_directory: &Path,
-    notice_id: &str,
-) -> Result<ImagePreviewV1, CaptureError> {
-    let master_key = load_key(app_data_directory)?;
-    let database = EncryptedDatabase::open(&app_data_directory.join("inbox.db"), &master_key)
-        .map_err(|_| CaptureError::Storage)?;
-    let detail = NoticeRepository::new(database.connection())
-        .notice_detail(notice_id)
-        .map_err(map_repository_error)?;
-    let asset = detail.source_asset.ok_or(CaptureError::MissingNotice)?;
-    let mut bytes = Vec::with_capacity(asset.byte_size);
-    AttachmentStore::new(app_data_directory.join("attachments"))
-        .read_to_writer(&asset.id, &asset.metadata, &mut bytes, &master_key)
-        .map_err(|_| CaptureError::Storage)?;
-    Ok(ImagePreviewV1 {
-        media_type: asset.media_type,
-        bytes,
-    })
-}
-
 pub fn update_published_time(
     app_data_directory: &Path,
     notice_id: &str,
@@ -245,7 +151,6 @@ pub fn set_notice_state(
 #[derive(Debug, Clone)]
 pub enum AnalysisInput {
     Text(String),
-    Image { bytes: Vec<u8>, media_type: String },
 }
 
 pub fn analysis_input(
@@ -262,18 +167,7 @@ pub fn analysis_input(
     if let Some(text) = detail.original_text {
         return Ok((AnalysisInput::Text(text), published_at));
     }
-    let asset = detail.source_asset.ok_or(CaptureError::MissingNotice)?;
-    let mut bytes = Vec::with_capacity(asset.byte_size);
-    AttachmentStore::new(app_data_directory.join("attachments"))
-        .read_to_writer(&asset.id, &asset.metadata, &mut bytes, &master_key)
-        .map_err(|_| CaptureError::Storage)?;
-    Ok((
-        AnalysisInput::Image {
-            bytes,
-            media_type: asset.media_type,
-        },
-        published_at,
-    ))
+    Err(CaptureError::ImageImportNotSupported)
 }
 
 fn open_database(app_data_directory: &Path) -> Result<EncryptedDatabase, CaptureError> {
@@ -1006,72 +900,6 @@ fn summary_to_contract(summary: NoticeSummary) -> NoticeSummaryV1 {
     }
 }
 
-fn extract_published_time_candidate(bytes: &[u8]) -> Option<PublishedTimeCandidate> {
-    let mut index = 0;
-    while index < bytes.len() {
-        if let Some(candidate) = parse_timestamp_at(bytes, index) {
-            return Some(PublishedTimeCandidate {
-                published_at: candidate,
-                source: if bytes[index..].starts_with(b"20") && bytes.get(index + 4) == Some(&b':')
-                {
-                    "embeddedMetadata".to_owned()
-                } else {
-                    "embeddedText".to_owned()
-                },
-            });
-        }
-        index += 1;
-    }
-    None
-}
-
-fn parse_timestamp_at(bytes: &[u8], index: usize) -> Option<String> {
-    let digits = |offset: usize, count: usize| -> Option<u32> {
-        let end = index.checked_add(offset + count)?;
-        let slice = bytes.get(index + offset..end)?;
-        if !slice.iter().all(u8::is_ascii_digit) {
-            return None;
-        }
-        slice.iter().try_fold(0_u32, |value, digit| {
-            value.checked_mul(10)?.checked_add(u32::from(digit - b'0'))
-        })
-    };
-    let year = digits(0, 4)?;
-    if !(2000..=2100).contains(&year) {
-        return None;
-    }
-    let separator = |offset: usize, expected: u8| bytes.get(index + offset) == Some(&expected);
-    let month_day_separator = if separator(4, b':') || separator(4, b'-') || separator(4, b'/') {
-        bytes[index + 4]
-    } else {
-        return None;
-    };
-    let month = digits(5, 2)?;
-    if !separator(7, month_day_separator) {
-        return None;
-    }
-    let day = digits(8, 2)?;
-    let time_offset = if separator(10, b' ') || separator(10, b'T') {
-        11
-    } else {
-        return None;
-    };
-    if !((1..=12).contains(&month) && (1..=31).contains(&day)) {
-        return None;
-    }
-    let hour = digits(time_offset, 2)?;
-    if bytes.get(index + time_offset + 2) != Some(&b':') {
-        return None;
-    }
-    let minute = digits(time_offset + 3, 2)?;
-    if hour > 23 || minute > 59 {
-        return None;
-    }
-    Some(format!(
-        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:00Z"
-    ))
-}
-
 fn detail_to_contract(detail: NoticeDetail) -> NoticeDetailV1 {
     let source_asset = detail.source_asset.map(|asset| SourceAssetInfoV1 {
         id: asset.id,
@@ -1087,124 +915,14 @@ fn detail_to_contract(detail: NoticeDetail) -> NoticeDetailV1 {
     }
 }
 
-fn image_dimensions(bytes: &[u8]) -> Result<(&'static str, u32, u32), CaptureError> {
-    if bytes.starts_with(b"\x89PNG\r\n\x1a\n")
-        && bytes.len() >= 45
-        && &bytes[12..16] == b"IHDR"
-        && bytes.ends_with(b"IEND\xaeB`\x82")
-    {
-        return Ok((
-            "image/png",
-            u32::from_be_bytes(bytes[16..20].try_into().unwrap()),
-            u32::from_be_bytes(bytes[20..24].try_into().unwrap()),
-        ));
-    }
-    if bytes.starts_with(&[0xff, 0xd8]) && bytes.ends_with(&[0xff, 0xd9]) {
-        return jpeg_dimensions(bytes).map(|(width, height)| ("image/jpeg", width, height));
-    }
-    if bytes.len() >= 30 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-        return webp_dimensions(bytes).map(|(width, height)| ("image/webp", width, height));
-    }
-    Err(CaptureError::UnsupportedImage)
-}
-
-fn jpeg_dimensions(bytes: &[u8]) -> Result<(u32, u32), CaptureError> {
-    let mut offset = 2;
-    while offset + 9 <= bytes.len() {
-        if bytes[offset] != 0xff {
-            return Err(CaptureError::InvalidImage);
-        }
-        while offset < bytes.len() && bytes[offset] == 0xff {
-            offset += 1;
-        }
-        if offset >= bytes.len() {
-            break;
-        }
-        let marker = bytes[offset];
-        offset += 1;
-        if marker == 0xd9 || marker == 0xda {
-            break;
-        }
-        if offset + 2 > bytes.len() {
-            return Err(CaptureError::InvalidImage);
-        }
-        let length = u16::from_be_bytes([bytes[offset], bytes[offset + 1]]) as usize;
-        if length < 2 || offset + length > bytes.len() {
-            return Err(CaptureError::InvalidImage);
-        }
-        if matches!(marker, 0xc0..=0xc3 | 0xc5..=0xc7 | 0xc9..=0xcb | 0xcd..=0xcf) {
-            if length < 8 {
-                return Err(CaptureError::InvalidImage);
-            }
-            return Ok((
-                u16::from_be_bytes([bytes[offset + 5], bytes[offset + 6]]) as u32,
-                u16::from_be_bytes([bytes[offset + 3], bytes[offset + 4]]) as u32,
-            ));
-        }
-        offset += length;
-    }
-    Err(CaptureError::InvalidImage)
-}
-
-fn webp_dimensions(bytes: &[u8]) -> Result<(u32, u32), CaptureError> {
-    match &bytes[12..16] {
-        b"VP8X" if bytes.len() >= 30 => Ok((
-            1 + u32::from_le_bytes([bytes[24], bytes[25], bytes[26], 0]),
-            1 + u32::from_le_bytes([bytes[27], bytes[28], bytes[29], 0]),
-        )),
-        b"VP8 " if bytes.len() >= 30 && bytes[23..26] == [0x9d, 0x01, 0x2a] => Ok((
-            u16::from_le_bytes([bytes[26], bytes[27]]) as u32 & 0x3fff,
-            u16::from_le_bytes([bytes[28], bytes[29]]) as u32 & 0x3fff,
-        )),
-        b"VP8L" if bytes.len() >= 25 && bytes[20] == 0x2f => {
-            let bits = u32::from_le_bytes([bytes[21], bytes[22], bytes[23], bytes[24]]);
-            Ok(((bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1))
-        }
-        _ => Err(CaptureError::InvalidImage),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        image_preview, import_image, import_text, list_notices, notice_detail,
-        relation_match_evidence, relation_type, validate_image, CaptureError,
+        import_image, import_text, list_notices, notice_detail, relation_match_evidence,
+        relation_type, CaptureError,
     };
     use crate::contracts::NoticeStateV1;
     use tempfile::tempdir;
-
-    fn png() -> Vec<u8> {
-        let mut png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR".to_vec();
-        png.extend([0, 0, 0, 2, 0, 0, 0, 3]);
-        png.extend([0; 13]);
-        png.extend(b"IEND\xaeB`\x82");
-        png
-    }
-
-    fn png_with_embedded_time() -> Vec<u8> {
-        let mut image = png();
-        let insertion = image.len() - 12;
-        image.splice(insertion..insertion, b"2026-08-28 17:30".iter().copied());
-        image
-    }
-
-    #[test]
-    fn validates_a_png_without_reading_from_disk() {
-        let result = validate_image(&png(), Some("image/png")).unwrap();
-        assert_eq!((result.pixel_width, result.pixel_height), (2, 3));
-    }
-
-    #[test]
-    fn rejects_unsupported_or_mismatched_images() {
-        assert!(matches!(
-            validate_image(b"not an image", None),
-            Err(CaptureError::UnsupportedImage)
-        ));
-        assert!(matches!(
-            validate_image(&png(), Some("image/jpeg")),
-            Err(CaptureError::UnsupportedImage)
-        ));
-    }
 
     #[test]
     fn rejects_blank_text_and_preserves_duplicate_text_submissions() {
@@ -1288,67 +1006,18 @@ mod tests {
     }
 
     #[test]
-    fn stores_images_encrypted_and_only_decrypts_for_the_requested_preview() {
-        let directory = tempdir().unwrap();
-        let original = png();
-        let notice = import_image(
-            directory.path(),
-            original.clone(),
-            Some("image/png".to_owned()),
-            "2026-08-27T09:00:00Z".to_owned(),
-        )
-        .unwrap();
-        let detail = notice_detail(directory.path(), &notice.id).unwrap();
-        let asset = detail.source_asset.unwrap();
-        let encrypted = std::fs::read(
-            directory
-                .path()
-                .join("attachments")
-                .join(format!("{}.enc", asset.id)),
-        )
-        .unwrap();
-
-        assert_ne!(encrypted, original);
-        assert_eq!(
-            image_preview(directory.path(), &notice.id).unwrap().bytes,
-            original
-        );
-    }
-
-    #[test]
-    fn extracts_embedded_image_time_as_a_candidate_without_running_ocr() {
-        let directory = tempdir().unwrap();
-        let notice = import_image(
-            directory.path(),
-            png_with_embedded_time(),
-            Some("image/png".to_owned()),
-            "2026-08-27T09:00:00Z".to_owned(),
-        )
-        .unwrap();
-        let detail = notice_detail(directory.path(), &notice.id).unwrap();
-
-        assert_eq!(
-            detail.summary.published_time_candidate.as_deref(),
-            Some("2026-08-28T17:30:00Z")
-        );
-        assert_eq!(
-            detail.summary.published_time_candidate_source.as_deref(),
-            Some("embeddedText")
-        );
-    }
-
-    #[test]
-    fn rejects_invalid_images_before_creating_an_attachment() {
+    fn rejects_image_import_without_creating_notices_or_attachments() {
         let directory = tempdir().unwrap();
         assert!(matches!(
             import_image(
-                directory.path(),
-                b"not an image".to_vec(),
-                Some("image/png".to_owned()),
-                "2026-08-27T09:00:00Z".to_owned(),
+            directory.path(),
+            b"image bytes must never be inspected".to_vec(),
+            Some("image/png".to_owned()),
+            "2026-08-27T09:00:00Z".to_owned(),
             ),
-            Err(CaptureError::UnsupportedImage)
+            Err(CaptureError::ImageImportNotSupported)
         ));
         assert!(!directory.path().join("attachments").exists());
+        assert!(!directory.path().join("inbox.db").exists());
     }
 }

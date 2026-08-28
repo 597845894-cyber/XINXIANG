@@ -8,10 +8,8 @@ export type CommandName =
   | "getModelResourceStatus"
   | "installModelResources"
   | "importTextNotice"
-  | "importImageNotice"
   | "listNotices"
   | "getNoticeDetail"
-  | "getNoticeImagePreview"
   | "updateNoticePublishedTime"
   | "setNoticeState"
   | "analyzeNotice"
@@ -77,24 +75,6 @@ export type EventName =
   | "analysisCompleted"
   | "reminderTriggered";
 
-export interface OcrPointV1 {
-  x: number;
-  y: number;
-}
-
-export interface OcrLineV1 {
-  text: string;
-  confidence: number;
-  boxPoints: [OcrPointV1, OcrPointV1, OcrPointV1, OcrPointV1];
-}
-
-export interface OcrResultV1 {
-  adapter: string;
-  elapsedMs: number;
-  lines: OcrLineV1[];
-  lowConfidence: boolean;
-}
-
 export interface ExtractedFieldV1 {
   name: string;
   value: string | null;
@@ -123,7 +103,6 @@ export interface AnalysisResultV1 {
   revisionId: string;
   classifierVersion: string;
   normalizedText: string;
-  ocr: OcrResultV1 | null;
   category: string;
   categoryConfidence: number;
   fields: ExtractedFieldV1[];
@@ -241,11 +220,6 @@ export interface SourceAssetInfoV1 {
 export interface NoticeDetailV1 extends NoticeSummaryV1 {
   originalText: string | null;
   sourceAsset: SourceAssetInfoV1 | null;
-}
-
-export interface ImagePreviewV1 {
-  mediaType: SourceAssetInfoV1["mediaType"];
-  bytes: number[];
 }
 
 export interface RouteDescriptorV1 {

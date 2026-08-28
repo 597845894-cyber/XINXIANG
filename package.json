@@ -10,7 +10,6 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "benchmark:ocr:summary": "python benchmarks/ocr/summarize.py benchmarks/results/raw/rapidocr-ppocrv3-mobile.json benchmarks/results/raw/rapidocr-ppocrv4-mobile.json --json-output benchmarks/results/ocr-summary.json --markdown-output docs/benchmarks/ocr-selection.md",
     "benchmark:semantic:summary": "node benchmarks/semantic/summarize.mjs benchmarks/results/raw/qwen2.5-1.5b.json benchmarks/results/raw/qwen2.5-3b.json --json-output benchmarks/results/semantic-summary.json --markdown-output docs/benchmarks/semantic-selection.md",
     "benchmark:responsiveness": "node benchmarks/combined/run_responsiveness.mjs && node benchmarks/combined/summarize.mjs",
     "preview": "vite preview",
@@ -39,7 +38,6 @@
     "@types/node": "^24.10.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
-    "image-size": "^2.0.2",
     "@vitejs/plugin-react": "^6.1.0",
     "eslint": "^9.39.0",
     "eslint-plugin-react-hooks": "^7.0.0",

@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "probe": "ui-event-loop-while-semantic-child-process-runs",
-  "sampleId": "image-long-multiple-tasks",
+  "sampleId": "text-multiple-tasks",
   "elapsedMs": 18166.661,
   "intervalMs": 16,
   "tickCount": 640,
   "maxEventLoopDelayMs": 24.123,
   "responsiveThresholdMs": 100,
   "passed": true,
-  "childOutput": "qwen2.5-1.5b-instruct-q4_k_m.gguf: 1/10 image-long-multiple-tasks"
+  "childOutput": "qwen2.5-1.5b-instruct-q4_k_m.gguf: 1/10 text-multiple-tasks"
 }

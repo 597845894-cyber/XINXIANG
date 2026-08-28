@@ -8,7 +8,12 @@ $ErrorActionPreference = 'Stop'
 $defaultBin = Join-Path $env:USERPROFILE '.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin'
 $localBin = Join-Path $env:USERPROFILE '.rustup\toolchains\stable-local\bin'
 $manifest = Join-Path $PSScriptRoot '..\src-tauri\Cargo.toml'
-$env:CARGO_TARGET_DIR = Join-Path $env:TEMP 'xinxiang-cargo-target'
+$buildRoot = Join-Path $PSScriptRoot '..\.local-build'
+New-Item -ItemType Directory -Force -Path $buildRoot | Out-Null
+$env:CARGO_TARGET_DIR = Join-Path $buildRoot 'cargo-target'
+$env:TEMP = Join-Path $buildRoot 'temp'
+$env:TMP = $env:TEMP
+New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
 
 if ($Action -eq 'Format') {
   $rustfmt = Join-Path $defaultBin 'rustfmt.exe'

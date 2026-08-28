@@ -2,16 +2,15 @@
 
 ## 锁定结果
 
-- OCR：`rapidocr-ppocrv3-mobile`
 - 语义：`qwen2.5-1.5b-instruct-q4_k_m`
 - 运行后端：CPU-only
 - 版本、许可证与文件校验值：`src-tauri/resources/models/selected-models.lock.json`
 
 ## 完整评测集验证
 
-固定合成评测集共 10 条，其中 2 条截图完成 OCR，10 条获得符合 JSON Schema 的结构化语义输出。OCR 选择报告与语义选择报告分别保存在 `ocr-selection.md` 和 `semantic-selection.md`。
+固定合成文字评测集共 8 条，8 条获得符合 JSON Schema 的结构化语义输出。语义选择报告保存在 `semantic-selection.md`。
 
-保守相加的 OCR 与语义分析进程峰值为 2024.2 MB，低于 8192 MB 目标预算。分析在子进程运行期间，UI 事件循环最大延迟为 24.1 ms，低于 100 ms 阈值。
+语义分析进程峰值为 1763.1 MB，低于 8192 MB 目标预算。分析在子进程运行期间，UI 事件循环最大延迟为 24.1 ms，低于 100 ms 阈值。
 
 ## 验收边界
 

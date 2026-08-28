@@ -19,8 +19,8 @@ describe("application contract v1", () => {
     expect(contract.commands).toContain("getSecurityStatus");
     expect(contract.commands).toContain("installModelResources");
     expect(contract.commands).toContain("importTextNotice");
-    expect(contract.commands).toContain("importImageNotice");
-    expect(contract.commands).toContain("getNoticeImagePreview");
+    expect(contract.commands).not.toContain("importImageNotice");
+    expect(contract.commands).not.toContain("getNoticeImagePreview");
     expect(contract.events).toContain("relativeDateRecalculationRequested");
   });
 

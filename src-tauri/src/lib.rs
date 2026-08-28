@@ -9,7 +9,7 @@ mod understanding;
 
 use contracts::{
     AnalysisProgressV1, AnalysisRevisionViewV1, AppBootstrapV1, BackupSummaryV1, CandidateViewV1,
-    ImagePreviewV1, NoticeDetailV1, NoticeRelationViewV1, NoticeStateV1, NoticeSummaryV1,
+    NoticeDetailV1, NoticeRelationViewV1, NoticeStateV1, NoticeSummaryV1,
     NotificationEventV1, ReminderViewV1, SecurityStatusV1, TaskRevisionViewV1, TaskViewV1,
 };
 use model_resources::{
@@ -260,12 +260,6 @@ fn get_notice_detail(app: AppHandle, notice_id: String) -> Result<NoticeDetailV1
 }
 
 #[tauri::command(rename_all = "camelCase")]
-fn get_notice_image_preview(app: AppHandle, notice_id: String) -> Result<ImagePreviewV1, String> {
-    capture::image_preview(&capture_data_directory(&app)?, &notice_id)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command(rename_all = "camelCase")]
 fn update_notice_published_time(
     app: AppHandle,
     notice_id: String,
@@ -287,7 +281,6 @@ fn set_notice_state(app: AppHandle, notice_id: String, state: NoticeStateV1) -> 
 fn analyze_notice(
     app: AppHandle,
     notice_id: String,
-    manual_text: Option<String>,
 ) -> Result<understanding::AnalysisResultV1, String> {
     let _queue_guard = analysis_queue()
         .lock()
@@ -311,36 +304,18 @@ fn analyze_notice(
     }
     let (input, published_at) = capture::analysis_input(&capture_data_directory(&app)?, &notice_id)
         .map_err(|error| error.to_string())?;
-    emit_progress("本地 OCR", 35);
+    emit_progress("准备本地文字分析", 35);
     if is_analysis_cancelled(&notice_id) {
         return Err("ANALYSIS_CANCELLED".to_owned());
     }
     let revision_id = format!("analysis-{}", uuid::Uuid::new_v4());
-    let is_manual_input = manual_text
-        .as_ref()
-        .is_some_and(|text| !text.trim().is_empty());
-    let result = match manual_text.clone().filter(|text| !text.trim().is_empty()) {
-        Some(text) => {
-            emit_progress("使用人工修正文字", 55);
+    let result = match input {
+        capture::AnalysisInput::Text(text) => {
+            emit_progress("本地文字分析", 65);
             understanding::analyze_text(&text, &published_at, revision_id.clone())
         }
-        None => match input {
-            capture::AnalysisInput::Text(text) => {
-                emit_progress("规则提取与分类", 65);
-                understanding::analyze_text(&text, &published_at, revision_id.clone())
-            }
-            capture::AnalysisInput::Image { bytes, media_type } => {
-                emit_progress("图像预处理与分块识别", 55);
-                understanding::analyze_image(
-                    &bytes,
-                    &media_type,
-                    &published_at,
-                    revision_id.clone(),
-                )
-            }
-        },
     };
-    let mut result = match result {
+    let result = match result {
         Ok(result) => result,
         Err(error) => {
             if error != understanding::UnderstandingError::ModelCancelled {
@@ -353,9 +328,6 @@ fn analyze_notice(
             return Err(error.to_string());
         }
     };
-    if is_manual_input {
-        result.classifier_version = "manual-ocr-input+rules-semantic-fallback-v1".to_owned();
-    }
     if is_analysis_cancelled(&notice_id) {
         return Err("ANALYSIS_CANCELLED".to_owned());
     }
@@ -376,27 +348,13 @@ fn analyze_notice(
         .zip(payloads.iter())
         .map(|(id, payload)| storage::repository::NewCandidate { id, payload })
         .collect::<Vec<_>>();
-    let ocr_text = manual_text
-        .as_deref()
-        .filter(|text| !text.trim().is_empty())
-        .map_or_else(
-            || {
-                result.ocr.as_ref().map(|ocr| {
-                    ocr.lines
-                        .iter()
-                        .map(|line| line.text.as_str())
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                })
-            },
-            |text| Some(text.to_owned()),
-        );
+    let analysis_text = Some(result.normalized_text.as_str());
     storage::repository::NoticeRepository::new(database.connection())
         .save_analysis_revision_full(
             &notice_id,
             &result.revision_id,
             &result.classifier_version,
-            ocr_text.as_deref(),
+            analysis_text,
             &rows,
         )
         .map_err(|error| error.to_string())?;
@@ -626,7 +584,6 @@ pub fn run() {
             import_image_notice,
             list_notices,
             get_notice_detail,
-            get_notice_image_preview,
             update_notice_published_time,
             set_notice_state,
             analyze_notice,

@@ -3,30 +3,6 @@ use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct OcrPointV1 {
-    pub x: f32,
-    pub y: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct OcrLineV1 {
-    pub text: String,
-    pub confidence: f32,
-    pub box_points: [OcrPointV1; 4],
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct OcrResultV1 {
-    pub adapter: String,
-    pub elapsed_ms: u64,
-    pub lines: Vec<OcrLineV1>,
-    pub low_confidence: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct ExtractedFieldV1 {
     pub name: String,
     pub value: Option<String>,
@@ -59,7 +35,6 @@ pub struct AnalysisResultV1 {
     pub revision_id: String,
     pub classifier_version: String,
     pub normalized_text: String,
-    pub ocr: Option<OcrResultV1>,
     pub category: String,
     pub category_confidence: f32,
     pub fields: Vec<ExtractedFieldV1>,
@@ -70,8 +45,7 @@ pub struct AnalysisResultV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnderstandingError {
-    ImageUnsupported,
-    OcrNoText,
+    TextRequired,
     InvalidModelOutput,
     ModelTimeout,
     ModelCancelled,
@@ -82,8 +56,7 @@ pub enum UnderstandingError {
 impl std::fmt::Display for UnderstandingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let code = match self {
-            Self::ImageUnsupported => "ANALYSIS_IMAGE_UNSUPPORTED",
-            Self::OcrNoText => "ANALYSIS_OCR_NO_TEXT",
+            Self::TextRequired => "ANALYSIS_TEXT_REQUIRED",
             Self::InvalidModelOutput => "ANALYSIS_MODEL_INVALID_JSON",
             Self::ModelTimeout => "ANALYSIS_MODEL_TIMEOUT",
             Self::ModelCancelled => "ANALYSIS_CANCELLED",
@@ -128,74 +101,6 @@ pub fn normalize_text(input: &str) -> String {
         .join("\n")
 }
 
-pub fn recognize_image(bytes: &[u8], media_type: &str) -> Result<OcrResultV1, UnderstandingError> {
-    if !matches!(media_type, "image/png" | "image/jpeg" | "image/webp") {
-        return Err(UnderstandingError::ImageUnsupported);
-    }
-    let start = std::time::Instant::now();
-    let fixture_mode = bytes
-        .windows("XINXIANG_OCR:".len())
-        .any(|window| window == b"XINXIANG_OCR:");
-    let text = printable_text(bytes);
-    if text.trim().is_empty() {
-        return Err(UnderstandingError::OcrNoText);
-    }
-    let lines: Vec<OcrLineV1> = text
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .enumerate()
-        .map(|(index, line)| {
-            let top = (index as f32 * 0.08).min(0.92);
-            OcrLineV1 {
-                text: line.to_owned(),
-                confidence: if fixture_mode && index == 0 {
-                    0.97
-                } else {
-                    0.42
-                },
-                box_points: [
-                    OcrPointV1 { x: 0.04, y: top },
-                    OcrPointV1 { x: 0.96, y: top },
-                    OcrPointV1 {
-                        x: 0.96,
-                        y: (top + 0.06).min(1.0),
-                    },
-                    OcrPointV1 {
-                        x: 0.04,
-                        y: (top + 0.06).min(1.0),
-                    },
-                ],
-            }
-        })
-        .collect();
-    let low_confidence = lines.iter().any(|line| line.confidence < 0.75);
-    Ok(OcrResultV1 {
-        adapter: "local-printable-fixture-v1".to_owned(),
-        elapsed_ms: start.elapsed().as_millis() as u64,
-        lines,
-        low_confidence,
-    })
-}
-
-fn printable_text(bytes: &[u8]) -> String {
-    let decoded = String::from_utf8_lossy(bytes);
-    let marker = decoded
-        .find("XINXIANG_OCR:")
-        .map(|index| &decoded[index + "XINXIANG_OCR:".len()..])
-        .unwrap_or(decoded.as_ref());
-    marker
-        .chars()
-        .map(|character| {
-            if character == '\0' || character == '\u{fffd}' {
-                '\n'
-            } else {
-                character
-            }
-        })
-        .collect()
-}
-
 pub fn parse_model_output(raw: &str) -> Result<serde_json::Value, UnderstandingError> {
     if raw.contains("__TIMEOUT__") {
         return Err(UnderstandingError::ModelTimeout);
@@ -226,7 +131,7 @@ pub fn analyze_text(
 ) -> Result<AnalysisResultV1, UnderstandingError> {
     let normalized = normalize_text(text);
     if normalized.is_empty() {
-        return Err(UnderstandingError::OcrNoText);
+        return Err(UnderstandingError::TextRequired);
     }
     let rules = extract_rules(&normalized, published_at)?;
     let category = classify(&normalized);
@@ -254,7 +159,6 @@ pub fn analyze_text(
         revision_id,
         classifier_version: "rules-semantic-fallback-v1".to_owned(),
         normalized_text: normalized,
-        ocr: None,
         category,
         category_confidence,
         fields: rules.fields,
@@ -262,24 +166,6 @@ pub fn analyze_text(
         warnings,
         requires_review,
     })
-}
-
-pub fn analyze_image(
-    bytes: &[u8],
-    media_type: &str,
-    published_at: &str,
-    revision_id: String,
-) -> Result<AnalysisResultV1, UnderstandingError> {
-    let ocr = recognize_image(bytes, media_type)?;
-    let text = ocr
-        .lines
-        .iter()
-        .map(|line| line.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let mut result = analyze_text(&text, published_at, revision_id)?;
-    result.ocr = Some(ocr);
-    Ok(result)
 }
 
 struct RuleExtraction {
@@ -847,8 +733,8 @@ fn days_in_month(year: i32, month: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        analyze_text, normalize_text, parse_model_output, recognize_image, resolve_absolute,
-        resolve_relative, UnderstandingError,
+        analyze_text, normalize_text, parse_model_output, resolve_absolute, resolve_relative,
+        UnderstandingError,
     };
 
     #[test]
@@ -857,16 +743,6 @@ mod tests {
             normalize_text("  提交：材料　\n\n截止：明天"),
             "提交:材料\n截止:明天"
         );
-    }
-
-    #[test]
-    fn image_adapter_returns_coordinates_and_low_confidence_signal() {
-        let result =
-            recognize_image("XINXIANG_OCR:提交材料\n明天截止".as_bytes(), "image/png").unwrap();
-        assert_eq!(result.lines.len(), 2);
-        assert!(result.lines[0].confidence > 0.9);
-        assert!(result.lines[0].box_points[2].y > result.lines[0].box_points[0].y);
-        assert!(result.low_confidence);
     }
 
     #[test]

@@ -509,7 +509,6 @@ button {
   background: var(--surface-muted);
 }
 
-.ocr-correction,
 .analysis-revisions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -520,36 +519,18 @@ button {
   background: var(--surface);
 }
 
-.ocr-correction strong,
 .analysis-revisions strong {
   font-size: 0.92rem;
 }
 
-.ocr-correction p,
 .analysis-revisions p {
   margin: 4px 0 0;
   color: var(--text-muted);
   font-size: 0.84rem;
 }
 
-.ocr-editor,
 .revision-list {
   grid-column: 1 / -1;
-}
-
-.ocr-editor textarea {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 132px;
-  margin-top: 6px;
-  resize: vertical;
-}
-
-.ocr-editor-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 8px;
 }
 
 .revision-list {
@@ -611,7 +592,7 @@ button {
   margin-left: auto;
 }
 
-.ocr-text {
+.normalized-text {
   max-height: 180px;
   overflow: auto;
   margin: 0;
@@ -820,15 +801,6 @@ button {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.source-image {
-  display: block;
-  width: auto;
-  max-width: 100%;
-  max-height: calc(100vh - 170px);
-  margin: 0 auto;
-  object-fit: contain;
-}
-
 .content-page {
   min-width: 0;
   overflow: auto;
@@ -895,38 +867,6 @@ button {
 .upload-zone span {
   color: #7b8782;
   font-size: 12px;
-}
-.clipboard-image-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin-top: 12px;
-  padding: 0;
-  border: 0;
-  color: #286d55;
-  background: transparent;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.clipboard-image-button:hover {
-  color: #164d3b;
-}
-.image-import-preview {
-  display: grid;
-  justify-items: start;
-  gap: 12px;
-  margin-top: 20px;
-}
-.image-import-preview img {
-  display: block;
-  width: auto;
-  max-width: 100%;
-  max-height: 360px;
-  border: 1px solid #d6deda;
-  border-radius: 6px;
-  object-fit: contain;
-  background: #fff;
 }
 .import-options {
   display: flex;
@@ -1156,14 +1096,6 @@ button {
 .task-source-detail p {
   margin: 8px 0 0;
   color: #4f5c56;
-}
-.task-source-image {
-  display: block;
-  max-width: 100%;
-  max-height: 420px;
-  margin-top: 10px;
-  border: 1px solid #dbe1de;
-  object-fit: contain;
 }
 .task-row {
   display: grid;

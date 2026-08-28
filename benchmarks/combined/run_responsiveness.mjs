@@ -23,7 +23,7 @@ const command = [
   "--output",
   output,
   "--sample-id",
-  "image-long-multiple-tasks",
+  "text-multiple-tasks",
   "--threads",
   "4",
 ];
@@ -60,7 +60,7 @@ if (exitCode !== 0) throw new Error(`responsiveness probe failed: ${stderr.slice
 const result = {
   schemaVersion: 1,
   probe: "ui-event-loop-while-semantic-child-process-runs",
-  sampleId: "image-long-multiple-tasks",
+  sampleId: "text-multiple-tasks",
   elapsedMs: Number(elapsedMs.toFixed(3)),
   intervalMs,
   tickCount,

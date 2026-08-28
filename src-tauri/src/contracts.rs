@@ -20,10 +20,8 @@ pub enum CommandName {
     GetModelResourceStatus,
     InstallModelResources,
     ImportTextNotice,
-    ImportImageNotice,
     ListNotices,
     GetNoticeDetail,
-    GetNoticeImagePreview,
     UpdateNoticePublishedTime,
     SetNoticeState,
     AnalyzeNotice,
@@ -137,13 +135,6 @@ pub struct NoticeDetailV1 {
     pub summary: NoticeSummaryV1,
     pub original_text: Option<String>,
     pub source_asset: Option<SourceAssetInfoV1>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ImagePreviewV1 {
-    pub media_type: String,
-    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -288,10 +279,8 @@ impl AppBootstrapV1 {
                 CommandName::GetModelResourceStatus,
                 CommandName::InstallModelResources,
                 CommandName::ImportTextNotice,
-                CommandName::ImportImageNotice,
                 CommandName::ListNotices,
                 CommandName::GetNoticeDetail,
-                CommandName::GetNoticeImagePreview,
                 CommandName::UpdateNoticePublishedTime,
                 CommandName::SetNoticeState,
                 CommandName::AnalyzeNotice,

@@ -1,14 +1,11 @@
 export const EVALUATION_DATASET_SCHEMA_VERSION = 1 as const;
 
-export type NoticeInput =
-  | { kind: "text"; text: string; noticePublishedAt: string; timezone: string }
-  | {
-      kind: "image";
-      asset: string;
-      referenceText: string;
-      noticePublishedAt: string;
-      timezone: string;
-    };
+export interface NoticeInput {
+  kind: "text";
+  text: string;
+  noticePublishedAt: string;
+  timezone: string;
+}
 
 export interface ExpectedTask {
   title: string;
@@ -46,14 +43,8 @@ export function assertEvaluationSample(value: unknown): asserts value is Evaluat
   if (!sample.id || !sample.input || !sample.expected || !Array.isArray(sample.coverage)) {
     throw new Error("sample is missing required fields");
   }
-  if (sample.input.kind === "text" && !sample.input.text.trim()) {
+  if (sample.input.kind !== "text" || !sample.input.text.trim()) {
     throw new Error(`${sample.id}: text input is empty`);
-  }
-  if (
-    sample.input.kind === "image" &&
-    (!sample.input.asset || !sample.input.referenceText.trim())
-  ) {
-    throw new Error(`${sample.id}: image input is incomplete`);
   }
   if (sample.expected.taskCount !== sample.expected.tasks.length) {
     throw new Error(`${sample.id}: taskCount does not match tasks`);

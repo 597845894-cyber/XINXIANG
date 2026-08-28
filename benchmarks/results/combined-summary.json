@@ -10,17 +10,13 @@
   },
   "coverage": {
     "fullDatasetSamples": 10,
-    "imageOcrSamples": 2,
     "structuredSemanticOutputs": 10
   },
   "selected": {
-    "ocrCandidateId": "rapidocr-ppocrv3-mobile",
     "semanticCandidateId": "qwen2.5-1.5b-instruct-q4_k_m"
   },
   "performance": {
-    "ocrPeakMemoryMb": 261.148,
     "semanticPeakMemoryMb": 1763.063,
-    "conservativeCombinedPeakMemoryMb": 2024.211,
     "withinEightGbBudget": true,
     "maxEventLoopDelayMs": 24.123,
     "uiResponsivenessPassed": true

@@ -67,7 +67,7 @@ pub fn selected_manifest() -> Result<ModelSelectionManifestV1, String> {
         return Err("MODEL_MANIFEST_VERSION_UNSUPPORTED".to_owned());
     }
     for component in &manifest.components {
-        if !matches!(component.kind.as_str(), "ocr" | "semantic" | "runtime") {
+        if !matches!(component.kind.as_str(), "semantic" | "runtime") {
             return Err("MODEL_MANIFEST_COMPONENT_KIND_INVALID".to_owned());
         }
         for file in &component.files {
@@ -314,7 +314,7 @@ mod tests {
         let manifest = selected_manifest().unwrap();
         let status = inspect_resources(directory.path(), &manifest);
         assert_eq!(manifest.schema_version, 1);
-        assert_eq!(manifest.components.len(), 3);
+        assert_eq!(manifest.components.len(), 2);
         assert_eq!(status.state, ModelResourceState::Missing);
         assert!(status.recovery_action.unwrap().contains("不需要联网"));
         assert!(!status.network_required);

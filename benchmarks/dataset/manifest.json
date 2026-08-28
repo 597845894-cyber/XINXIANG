@@ -6,8 +6,6 @@
   "description": "Synthetic campus notice fixtures. No real names, accounts, groups, phone numbers, or student data are included.",
   "requiredCoverage": [
     "text",
-    "clear-screenshot",
-    "long-screenshot",
     "multiple-tasks",
     "missing-time",
     "relative-date",
@@ -18,8 +16,6 @@
   ],
   "samples": [
     "text-required-absolute.json",
-    "image-clear-relative.json",
-    "image-long-multiple-tasks.json",
     "text-multiple-tasks.json",
     "text-missing-time.json",
     "text-relative-date.json",

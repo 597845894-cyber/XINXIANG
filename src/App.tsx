@@ -14,10 +14,9 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
-  Upload,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ComponentType } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 
 import type {
   AnalysisResultV1,
@@ -35,7 +34,6 @@ import type {
 } from "./contracts/v1";
 import {
   getNoticeDetail,
-  getNoticeImagePreview,
   getSecurityStatus,
   analyzeNotice,
   cancelAnalysis,
@@ -43,7 +41,6 @@ import {
   createManualTask,
   editTaskCandidate,
   getTaskHistory,
-  importImageNotice,
   importTextNotice,
   ignoreTaskCandidate,
   isDesktopRuntime,
@@ -112,7 +109,7 @@ function noticeTone(state: NoticeState) {
 }
 
 function displayNoticeTitle(notice: NoticeSummaryV1) {
-  if (notice.sourceKind === "image") return "通知截图";
+  if (notice.sourceKind === "image") return "历史图片通知";
   return notice.excerpt.split(/\r?\n/, 1)[0] || "文字通知";
 }
 
@@ -183,11 +180,8 @@ function InboxView({ openImport }: { openImport: () => void }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [sourceOpen, setSourceOpen] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResultV1 | null>(null);
   const [analysisState, setAnalysisState] = useState<"idle" | "running" | "failed">("idle");
-  const [ocrEditorOpen, setOcrEditorOpen] = useState(false);
-  const [manualOcrText, setManualOcrText] = useState("");
   const [revisions, setRevisions] = useState<AnalysisRevisionViewV1[]>([]);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [deleteMode, setDeleteMode] = useState<"cascade" | "keepTasks" | null>(null);
@@ -229,32 +223,9 @@ function InboxView({ openImport }: { openImport: () => void }) {
       .catch(() => setRevisions([]));
   }, [selectedId]);
 
-  useEffect(() => {
-    return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-    };
-  }, [previewUrl]);
-
   async function openSource() {
     if (!detail) return;
     setError("");
-    if (detail.sourceAsset) {
-      try {
-        const preview = await getNoticeImagePreview(detail.id);
-        if (preview) {
-          const nextUrl = URL.createObjectURL(
-            new Blob([new Uint8Array(preview.bytes)], { type: preview.mediaType }),
-          );
-          setPreviewUrl((current) => {
-            if (current) URL.revokeObjectURL(current);
-            return nextUrl;
-          });
-        }
-      } catch {
-        setError("截图无法读取，文件可能已损坏。");
-        return;
-      }
-    }
     setSourceOpen(true);
   }
 
@@ -332,12 +303,10 @@ function InboxView({ openImport }: { openImport: () => void }) {
         );
       }
       setAnalysisState("idle");
-    } catch (error) {
+    } catch {
       setAnalysisState("failed");
       setError(
-        String(error).includes("ANALYSIS_OCR_NO_TEXT")
-          ? "未能从截图提取文字，可先手工录入后重试。"
-          : "本地分析未完成，请稍后重试。",
+      "本地分析未完成，请稍后重试。",
       );
     }
   }
@@ -352,18 +321,9 @@ function InboxView({ openImport }: { openImport: () => void }) {
     }
   }
 
-  function openOcrEditor() {
-    setManualOcrText(
-      (current) => current || analysis?.normalizedText || revisions[0]?.ocrText || "",
-    );
-    setOcrEditorOpen(true);
-  }
-
   function selectNotice(noticeId: string) {
     setAnalysis(null);
     setAnalysisState("idle");
-    setOcrEditorOpen(false);
-    setManualOcrText("");
     setRevisionsOpen(false);
     setSelectedId(noticeId);
   }
@@ -402,7 +362,7 @@ function InboxView({ openImport }: { openImport: () => void }) {
         <div className="notice-list">
           {loading ? <p className="empty-notice">正在读取本地通知...</p> : null}
           {!loading && !notices.length ? (
-            <p className="empty-notice">这里还没有通知。导入文字或截图后会显示在这里。</p>
+            <p className="empty-notice">这里还没有通知。导入文字后会显示在这里。</p>
           ) : null}
           {notices.map((notice) => (
             <button
@@ -418,7 +378,7 @@ function InboxView({ openImport }: { openImport: () => void }) {
                   <time>{new Date(notice.publishedAt).toLocaleString()}</time>
                 </span>
                 <span className="notice-excerpt">
-                  {notice.excerpt || "已加密保存的截图，等待本地识别。"}
+                  {notice.excerpt || "历史图片记录仅保留，不会读取或分析图片内容。"}
                 </span>
                 <span className={`status-label ${noticeTone(notice.inboxState)}`}>
                   {noticeStateLabels[notice.inboxState]}
@@ -438,7 +398,7 @@ function InboxView({ openImport }: { openImport: () => void }) {
                 </span>
                 <h2>{displayNoticeTitle(detail)}</h2>
                 <p>
-                  {detail.sourceKind === "text" ? "来自文字粘贴" : "来自截图"} ·{" "}
+                  {detail.sourceKind === "text" ? "来自文字粘贴" : "历史图片记录（只读）"} ·{" "}
                   {new Date(detail.publishedAt).toLocaleString()}
                 </p>
               </div>
@@ -481,49 +441,6 @@ function InboxView({ openImport }: { openImport: () => void }) {
                 </button>
               ) : null}
             </div>
-            {detail.sourceKind === "image" ? (
-              <section className="ocr-correction" aria-label="OCR 文字修正">
-                <div>
-                  <strong>识别文字修正</strong>
-                  <p>原始截图保持不变。修正后的文字会作为新的分析版本保存。</p>
-                </div>
-                <button className="secondary-button" onClick={openOcrEditor} type="button">
-                  修正识别文字
-                </button>
-                {ocrEditorOpen ? (
-                  <div className="ocr-editor">
-                    <label>
-                      手工输入或修正后的文字
-                      <textarea
-                        aria-label="手工输入或修正后的文字"
-                        onChange={(event) => setManualOcrText(event.target.value)}
-                        placeholder="OCR 失败时可在这里录入截图中的通知文字"
-                        value={manualOcrText}
-                      />
-                    </label>
-                    <div className="ocr-editor-actions">
-                      <button
-                        className="secondary-button"
-                        disabled={!manualOcrText.trim() || analysisState === "running"}
-                        onClick={() => void runAnalysis(manualOcrText.trim())}
-                        type="button"
-                      >
-                        使用修正文字重新分析
-                      </button>
-                      <button
-                        className="icon-button"
-                        aria-label="关闭文字修正"
-                        onClick={() => setOcrEditorOpen(false)}
-                        title="关闭"
-                        type="button"
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </section>
-            ) : null}
             {revisions.length ? (
               <section className="analysis-revisions" aria-label="分析版本差异">
                 <div>
@@ -564,7 +481,7 @@ function InboxView({ openImport }: { openImport: () => void }) {
                   <strong>{analysis.category}</strong>
                   <span>{Math.round(analysis.categoryConfidence * 100)}% 可信</span>
                 </div>
-                {analysis.ocr ? <pre className="ocr-text">{analysis.normalizedText}</pre> : null}
+                <pre className="normalized-text">{analysis.normalizedText}</pre>
                 {analysis.candidates.length ? (
                   <div className="candidate-list">
                     {analysis.candidates.map((candidate) => (
@@ -605,7 +522,7 @@ function InboxView({ openImport }: { openImport: () => void }) {
               {detail.publishedTimeCandidate ? (
                 <div className="time-candidate" role="status">
                   <div>
-                    <strong>发现截图时间候选</strong>
+                    <strong>发现历史记录的时间候选</strong>
                     <span>
                       {new Date(detail.publishedTimeCandidate).toLocaleString()} ·{" "}
                       {detail.publishedTimeCandidateSource === "embeddedMetadata"
@@ -626,8 +543,7 @@ function InboxView({ openImport }: { openImport: () => void }) {
               ) : null}
               {detail.sourceAsset ? (
                 <p className="source-meta">
-                  截图已加密保存 · {detail.sourceAsset.pixelWidth} ×{" "}
-                  {detail.sourceAsset.pixelHeight}
+                  历史图片记录仅保留，不会在文字版中读取或显示。
                 </p>
               ) : (
                 <p className="source-meta">文字原文已加密保存于本地数据库。</p>
@@ -660,16 +576,12 @@ function InboxView({ openImport }: { openImport: () => void }) {
         {sourceOpen && detail ? (
           <div className="source-dialog" role="dialog" aria-modal="true" aria-label="原始通知">
             <div className="source-dialog-content">
-              <div className="detail-heading">
+                  <div className="detail-heading">
                 <h2>原始通知</h2>
                 <button
                   className="icon-button"
                   onClick={() => {
                     setSourceOpen(false);
-                    setPreviewUrl((current) => {
-                      if (current) URL.revokeObjectURL(current);
-                      return null;
-                    });
                   }}
                   type="button"
                   aria-label="关闭原文"
@@ -680,9 +592,7 @@ function InboxView({ openImport }: { openImport: () => void }) {
               {detail.originalText ? (
                 <pre className="original-text">{detail.originalText}</pre>
               ) : null}
-              {previewUrl ? (
-                <img className="source-image" src={previewUrl} alt="原始通知截图" />
-              ) : null}
+              {!detail.originalText ? <p>这是一条历史图片记录；文字版不读取或显示图片内容。</p> : null}
             </div>
           </div>
         ) : null}
@@ -695,7 +605,7 @@ function InboxView({ openImport }: { openImport: () => void }) {
                   <p>
                     {deleteMode === "cascade"
                       ? "将同时删除该通知的分析记录、关联任务、未来提醒和加密附件。"
-                      : "任务将保留，但会明确标记为缺少原文依据，之后不能再查看通知内容或截图。"}
+                      : "任务将保留，但会明确标记为缺少原文依据，之后不能再查看通知内容。"}
                   </p>
                 </div>
                 <button
@@ -757,58 +667,10 @@ function InboxView({ openImport }: { openImport: () => void }) {
 }
 
 function QuickImportView({ imported }: { imported: () => void }) {
-  const [mode, setMode] = useState<"text" | "image">("text");
   const [text, setText] = useState("");
   const [publishedAt, setPublishedAt] = useState(initialPublishedTime);
-  const [image, setImage] = useState<{
-    bytes: number[];
-    mediaType: string;
-    previewUrl: string;
-  } | null>(null);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    return () => {
-      if (image) URL.revokeObjectURL(image.previewUrl);
-    };
-  }, [image]);
-
-  async function setImageFromBlob(blob: Blob) {
-    const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
-    const previewUrl = URL.createObjectURL(blob);
-    setImage((current) => {
-      if (current) URL.revokeObjectURL(current.previewUrl);
-      return { bytes, mediaType: blob.type, previewUrl };
-    });
-    setMessage("");
-  }
-
-  async function chooseImage(file: File | null) {
-    if (!file) return;
-    await setImageFromBlob(file);
-  }
-
-  async function readClipboardImage() {
-    setMessage("");
-    try {
-      const clipboardItems = await navigator.clipboard.read();
-      const item = clipboardItems.find((candidate) =>
-        candidate.types.some((type) => ["image/png", "image/jpeg", "image/webp"].includes(type)),
-      );
-      const type = item?.types.find((candidate) =>
-        ["image/png", "image/jpeg", "image/webp"].includes(candidate),
-      );
-      if (!item || !type) {
-        setMessage("剪贴板中没有可导入的 PNG、JPG 或 WebP 图片。");
-        return;
-      }
-      await setImageFromBlob(await item.getType(type));
-    } catch {
-      setMessage("无法读取剪贴板图片。请允许访问后重试，或直接选择本地截图。");
-    }
-  }
 
   async function createNotice() {
     const normalizedPublishedAt = toPublishedTime(publishedAt);
@@ -823,18 +685,8 @@ function QuickImportView({ imported }: { imported: () => void }) {
     setSaving(true);
     setMessage("");
     try {
-      if (mode === "text") await importTextNotice(text, normalizedPublishedAt);
-      else if (image)
-        await importImageNotice(image.bytes, image.mediaType || null, normalizedPublishedAt);
-      else {
-        setMessage("请先选择或粘贴一张通知截图。");
-        return;
-      }
+      await importTextNotice(text, normalizedPublishedAt);
       setText("");
-      setImage((current) => {
-        if (current) URL.revokeObjectURL(current.previewUrl);
-        return null;
-      });
       setMessage("通知已加密保存到本机，等待本地分析。");
       imported();
     } catch (error) {
@@ -842,9 +694,7 @@ function QuickImportView({ imported }: { imported: () => void }) {
       setMessage(
         code.includes("NOTICE_TEXT_REQUIRED")
           ? "请粘贴有效的通知文字。"
-          : code.includes("NOTICE_IMAGE")
-            ? "图片格式、大小或内容无效，请更换后重试。"
-            : "通知未能保存，请检查本地数据目录。",
+          : "通知未能保存，请检查本地数据目录。",
       );
     } finally {
       setSaving(false);
@@ -853,10 +703,6 @@ function QuickImportView({ imported }: { imported: () => void }) {
 
   function clearImport() {
     setText("");
-    setImage((current) => {
-      if (current) URL.revokeObjectURL(current.previewUrl);
-      return null;
-    });
     setMessage("");
   }
 
@@ -868,24 +714,7 @@ function QuickImportView({ imported }: { imported: () => void }) {
         <p>内容只在当前设备中处理和保存。</p>
       </div>
       <div className="import-workspace">
-        <div className="segmented-control large" aria-label="导入方式">
-          <button
-            className={mode === "text" ? "is-active" : ""}
-            onClick={() => setMode("text")}
-            type="button"
-          >
-            <ClipboardPaste size={17} /> 粘贴文字
-          </button>
-          <button
-            className={mode === "image" ? "is-active" : ""}
-            onClick={() => setMode("image")}
-            type="button"
-          >
-            <Upload size={17} /> 上传截图
-          </button>
-        </div>
-        {mode === "text" ? (
-          <label className="import-input">
+        <label className="import-input">
             <span>通知原文</span>
             <textarea
               value={text}
@@ -893,48 +722,7 @@ function QuickImportView({ imported }: { imported: () => void }) {
               placeholder="在此粘贴通知文字"
               rows={10}
             />
-          </label>
-        ) : (
-          <>
-            <input
-              ref={fileInput}
-              className="sr-only"
-              accept="image/png,image/jpeg,image/webp"
-              onChange={(event) => void chooseImage(event.target.files?.[0] ?? null)}
-              type="file"
-            />
-            {image ? (
-              <div className="image-import-preview">
-                <img src={image.previewUrl} alt="待导入通知截图" />
-                <button
-                  className="secondary-button"
-                  onClick={() => fileInput.current?.click()}
-                  type="button"
-                >
-                  更换截图
-                </button>
-              </div>
-            ) : (
-              <button
-                aria-label="选择通知截图"
-                className="upload-zone"
-                onClick={() => fileInput.current?.click()}
-                type="button"
-              >
-                <Upload size={28} />
-                <strong>选择通知截图</strong>
-                <span>支持 PNG、JPG 和 WebP</span>
-              </button>
-            )}
-            <button
-              className="clipboard-image-button"
-              onClick={() => void readClipboardImage()}
-              type="button"
-            >
-              <ClipboardPaste size={16} /> 粘贴剪贴板图片
-            </button>
-          </>
-        )}
+        </label>
         <div className="import-options">
           <label>
             <span>通知发布时间</span>
@@ -1371,14 +1159,7 @@ function TasksView() {
   const [history, setHistory] = useState<TaskRevisionViewV1[] | null>(null);
   const [historyTask, setHistoryTask] = useState<TaskViewV1 | null>(null);
   const [sourceDetail, setSourceDetail] = useState<NoticeDetailV1 | null>(null);
-  const [sourceImageUrl, setSourceImageUrl] = useState<string | null>(null);
   const [now] = useState(() => Date.now());
-
-  useEffect(() => {
-    return () => {
-      if (sourceImageUrl) URL.revokeObjectURL(sourceImageUrl);
-    };
-  }, [sourceImageUrl]);
 
   async function refresh() {
     const next = await listTasks();
@@ -1500,10 +1281,6 @@ function TasksView() {
       setHistory(revisions);
       setHistoryTask(task);
       setSourceDetail(null);
-      setSourceImageUrl((current) => {
-        if (current) URL.revokeObjectURL(current);
-        return null;
-      });
       setMessage(
         revisions ? `已加载 ${revisions.length} 个修订版本。` : "浏览器演示数据暂不连接历史记录。",
       );
@@ -1520,15 +1297,6 @@ function TasksView() {
     try {
       const detail = await getNoticeDetail(task.noticeId);
       setSourceDetail(detail);
-      const preview = detail?.sourceAsset ? await getNoticeImagePreview(task.noticeId) : null;
-      setSourceImageUrl((current) => {
-        if (current) URL.revokeObjectURL(current);
-        return preview
-          ? URL.createObjectURL(
-              new Blob([new Uint8Array(preview.bytes)], { type: preview.mediaType }),
-            )
-          : null;
-      });
       setMessage(detail ? "已加载原始通知依据。" : "原始通知已不可访问。");
     } catch {
       setMessage("无法读取原始通知依据。");
@@ -1635,10 +1403,6 @@ function TasksView() {
                     setHistoryTask(null);
                     setHistory(null);
                     setSourceDetail(null);
-                    setSourceImageUrl((current) => {
-                      if (current) URL.revokeObjectURL(current);
-                      return null;
-                    });
                   }}
                   type="button"
                 >
@@ -1673,10 +1437,7 @@ function TasksView() {
                 <div className="task-source-detail">
                   <strong>原始通知</strong>
                   {sourceDetail.originalText ? <p>{sourceDetail.originalText}</p> : null}
-                  {sourceImageUrl ? (
-                    <img alt="任务来源截图" className="task-source-image" src={sourceImageUrl} />
-                  ) : null}
-                  {!sourceDetail.originalText && !sourceImageUrl ? <p>该来源已无法读取。</p> : null}
+                  {!sourceDetail.originalText ? <p>该来源为历史图片记录，文字版不会读取图片内容。</p> : null}
                 </div>
               ) : null}
             </section>
@@ -1905,7 +1666,7 @@ function SettingsView() {
           </div>
           <div className="setting-copy">
             <h3>本地数据</h3>
-            <p>通知、截图和任务保存在当前设备，不连接云端账户。</p>
+            <p>通知文字和任务保存在当前设备，不连接云端账户。</p>
           </div>
           <button className="secondary-button" type="button">
             查看存储位置

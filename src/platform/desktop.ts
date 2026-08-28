@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  ImagePreviewV1,
   CandidateViewV1,
   AnalysisProgressV1,
   AnalysisRevisionViewV1,
@@ -57,19 +56,6 @@ export async function importTextNotice(
   return invoke<NoticeSummaryV1>("import_text_notice", { originalText, publishedAt });
 }
 
-export async function importImageNotice(
-  bytes: number[],
-  declaredMediaType: string | null,
-  publishedAt: string,
-): Promise<NoticeSummaryV1 | null> {
-  if (!isDesktopRuntime()) return null;
-  return invoke<NoticeSummaryV1>("import_image_notice", {
-    bytes,
-    declaredMediaType,
-    publishedAt,
-  });
-}
-
 export async function listNotices(state?: NoticeState): Promise<NoticeSummaryV1[] | null> {
   if (!isDesktopRuntime()) return null;
   return invoke<NoticeSummaryV1[]>("list_notices", { state: state ?? null });
@@ -78,11 +64,6 @@ export async function listNotices(state?: NoticeState): Promise<NoticeSummaryV1[
 export async function getNoticeDetail(noticeId: string): Promise<NoticeDetailV1 | null> {
   if (!isDesktopRuntime()) return null;
   return invoke<NoticeDetailV1>("get_notice_detail", { noticeId });
-}
-
-export async function getNoticeImagePreview(noticeId: string): Promise<ImagePreviewV1 | null> {
-  if (!isDesktopRuntime()) return null;
-  return invoke<ImagePreviewV1>("get_notice_image_preview", { noticeId });
 }
 
 export async function updateNoticePublishedTime(
