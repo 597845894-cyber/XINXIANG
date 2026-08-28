@@ -84,6 +84,8 @@ export interface ExtractedFieldV1 {
 }
 
 export interface TaskCandidatePayloadV1 {
+  analysisSchemaVersion?: number;
+  modelPromptVersion?: string | null;
   title: string;
   startAt: string | null;
   dueAt: string | null;
@@ -96,10 +98,25 @@ export interface TaskCandidatePayloadV1 {
   confidence: number;
   evidence: string[];
   status: "trusted" | "needsReview" | "missing" | "conflict";
+  candidateId?: string | null;
+  parentId?: string | null;
+  dependsOn?: string[];
+  relation?: "standalone" | "parent" | "preparation" | "conditional";
+  condition?: string | null;
+  timeScopeId?: string | null;
+  duePrecision?: "date" | "period" | "exact" | null;
+  timeResolutionStatus?: "resolved" | "needsReview" | "conflict" | null;
+  summary?: string | null;
+  aggregationKey?: string | null;
+  detailActions?: string[];
+  timeSummary?: string | null;
+  needsConfirmation?: boolean;
+  aggregationNote?: string | null;
 }
 
 export interface AnalysisResultV1 {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
+  modelPromptVersion?: string;
   revisionId: string;
   classifierVersion: string;
   normalizedText: string;

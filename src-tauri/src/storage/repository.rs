@@ -1543,7 +1543,9 @@ mod tests {
     fn confirms_three_stage_notice_candidates_independently_with_audit_rows() {
         let database = database();
         let repository = NoticeRepository::new(database.connection());
-        repository.create_notice("notice-three-stage", "报名、提交材料、参加活动").unwrap();
+        repository
+            .create_notice("notice-three-stage", "报名、提交材料、参加活动")
+            .unwrap();
         repository
             .save_analysis_revision_full(
                 "notice-three-stage",
@@ -1551,24 +1553,43 @@ mod tests {
                 "qwen-v1",
                 Some("报名、提交材料、参加活动"),
                 &[
-                    NewCandidate { id: "candidate-signup", payload: br#"{"title":"\u62a5\u540d"}"# },
-                    NewCandidate { id: "candidate-materials", payload: br#"{"title":"\u63d0\u4ea4\u6750\u6599"}"# },
-                    NewCandidate { id: "candidate-event", payload: br#"{"title":"\u53c2\u52a0\u6d3b\u52a8"}"# },
+                    NewCandidate {
+                        id: "candidate-signup",
+                        payload: br#"{"title":"\u62a5\u540d"}"#,
+                    },
+                    NewCandidate {
+                        id: "candidate-materials",
+                        payload: br#"{"title":"\u63d0\u4ea4\u6750\u6599"}"#,
+                    },
+                    NewCandidate {
+                        id: "candidate-event",
+                        payload: br#"{"title":"\u53c2\u52a0\u6d3b\u52a8"}"#,
+                    },
                 ],
             )
             .unwrap();
 
         for (candidate, task, revision) in [
             ("candidate-signup", "task-signup", "task-revision-signup"),
-            ("candidate-materials", "task-materials", "task-revision-materials"),
+            (
+                "candidate-materials",
+                "task-materials",
+                "task-revision-materials",
+            ),
             ("candidate-event", "task-event", "task-revision-event"),
         ] {
-            repository.confirm_candidate(candidate, task, revision, br#"{}"#).unwrap();
+            repository
+                .confirm_candidate(candidate, task, revision, br#"{}"#)
+                .unwrap();
         }
 
         let task_count: i64 = database
             .connection()
-            .query_row("SELECT COUNT(*) FROM tasks WHERE notice_id = 'notice-three-stage'", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE notice_id = 'notice-three-stage'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         let audit_count: i64 = database
             .connection()

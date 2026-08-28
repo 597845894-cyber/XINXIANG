@@ -15,7 +15,7 @@ describe("synthetic campus notice evaluation dataset", () => {
   const samples = manifest.samples.map(readSample);
 
   it("is explicitly synthetic and covers every required scenario", () => {
-    expect(manifest.schemaVersion).toBe(1);
+    expect(manifest.schemaVersion).toBe(2);
     expect(manifest.privacy).toBe("synthetic-only");
     expect(new Set(samples.flatMap((sample) => sample.coverage))).toEqual(
       new Set(manifest.requiredCoverage),
@@ -23,7 +23,7 @@ describe("synthetic campus notice evaluation dataset", () => {
   });
 
   it("contains unique, structurally valid samples with grounded task evidence", () => {
-    expect(samples).toHaveLength(8);
+    expect(samples).toHaveLength(12);
     expect(new Set(samples.map((sample) => sample.id))).toHaveLength(samples.length);
     for (const sample of samples) {
       expect(sample.expected.taskCount).toBe(sample.expected.tasks.length);

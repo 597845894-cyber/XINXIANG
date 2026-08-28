@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "datasetId": "xinxiang-campus-notices-synthetic-v1",
+  "schemaVersion": 2,
+  "datasetId": "xinxiang-campus-notices-synthetic-v2",
   "language": "zh-CN",
   "privacy": "synthetic-only",
   "description": "Synthetic campus notice fixtures. No real names, accounts, groups, phone numbers, or student data are included.",
@@ -12,7 +12,11 @@
     "conflict",
     "reschedule",
     "cancellation",
-    "information-only"
+    "information-only",
+    "conditional",
+    "shared-deadline",
+    "task-dependencies",
+    "real-notice-task-decomposition"
   ],
   "samples": [
     "text-required-absolute.json",
@@ -22,6 +26,10 @@
     "text-conflict.json",
     "text-reschedule.json",
     "text-cancellation.json",
-    "text-information-only.json"
+    "text-information-only.json",
+    "text-internship-materials.json"
+    ,"text-different-deadlines.json"
+    ,"text-single-task.json"
+    ,"text-no-date.json"
   ]
 }

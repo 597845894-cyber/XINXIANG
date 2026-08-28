@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["category", "changeIntent", "tasks", "uncertainties"],
+  "properties": {
+    "category": { "type": "string", "enum": ["required-action", "schedule", "voluntary", "result-or-change", "information-only"] },
+    "changeIntent": { "type": "string", "enum": ["none", "reschedule", "cancel"] },
+    "tasks": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "timeExpression", "locationOrEntry", "materials", "audience", "required", "evidence", "id", "parentId", "dependsOn", "relation", "condition", "timeScopeId"],
+        "properties": {
+          "id": { "type": ["string", "null"] },
+          "title": { "type": "string", "minLength": 1 },
+          "timeExpression": { "type": ["string", "null"] },
+          "locationOrEntry": { "type": ["string", "null"] },
+          "materials": { "type": "array", "items": { "type": "string" } },
+          "audience": { "type": ["string", "null"] },
+          "required": { "type": ["boolean", "null"] },
+          "evidence": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+          "parentId": { "type": ["string", "null"] },
+          "dependsOn": { "type": "array", "items": { "type": "string" } },
+          "relation": { "type": "string", "enum": ["standalone", "parent", "preparation", "conditional"] },
+          "condition": { "type": ["string", "null"] },
+          "timeScopeId": { "type": ["string", "null"] },
+          "summary": { "type": ["string", "null"] },
+          "aggregationKey": { "type": ["string", "null"] },
+          "detailActions": { "type": "array", "items": { "type": "string" } },
+          "timeSummary": { "type": ["string", "null"] },
+          "needsConfirmation": { "type": "boolean" },
+          "aggregationNote": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "uncertainties": { "type": "array", "items": { "type": "string" } }
+  }
+}

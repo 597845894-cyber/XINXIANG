@@ -1,4 +1,4 @@
-export const EVALUATION_DATASET_SCHEMA_VERSION = 1 as const;
+export const EVALUATION_DATASET_SCHEMA_VERSION = 2 as const;
 
 export interface NoticeInput {
   kind: "text";
@@ -17,10 +17,14 @@ export interface ExpectedTask {
   audience?: string;
   required?: boolean;
   evidence: string[];
+  condition?: string;
+  parentId?: string;
+  relation?: "standalone" | "parent" | "preparation" | "conditional";
+  detailActions?: string[];
 }
 
 export interface EvaluationSampleV1 {
-  schemaVersion: typeof EVALUATION_DATASET_SCHEMA_VERSION;
+  schemaVersion: 1 | typeof EVALUATION_DATASET_SCHEMA_VERSION;
   id: string;
   input: NoticeInput;
   coverage: string[];
@@ -37,7 +41,7 @@ export interface EvaluationSampleV1 {
 export function assertEvaluationSample(value: unknown): asserts value is EvaluationSampleV1 {
   if (!value || typeof value !== "object") throw new Error("sample must be an object");
   const sample = value as Partial<EvaluationSampleV1>;
-  if (sample.schemaVersion !== EVALUATION_DATASET_SCHEMA_VERSION) {
+  if (sample.schemaVersion !== 1 && sample.schemaVersion !== EVALUATION_DATASET_SCHEMA_VERSION) {
     throw new Error("unsupported sample schema version");
   }
   if (!sample.id || !sample.input || !sample.expected || !Array.isArray(sample.coverage)) {
@@ -52,6 +56,9 @@ export function assertEvaluationSample(value: unknown): asserts value is Evaluat
   for (const task of sample.expected.tasks) {
     if (!task.title || !Array.isArray(task.evidence) || task.evidence.length === 0) {
       throw new Error(`${sample.id}: task has no title or evidence`);
+    }
+    if (task.detailActions && task.detailActions.some((item) => !item.trim())) {
+      throw new Error(`${sample.id}: detail action is empty`);
     }
   }
 }

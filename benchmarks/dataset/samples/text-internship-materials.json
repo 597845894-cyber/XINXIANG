@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 2,
+  "id": "text-internship-materials",
+  "input": {
+    "kind": "text",
+    "text": "@所有人 各位同学上午好 专业实习即将结束，请各位同学尽快完成校友邦上的所有任务。实习结束之后，8月31日下午上课前需要提交以下纸质材料给我。材料主要有两项：1.实习手册(从校友邦导出，带有导师的评语，如无评语，请联系指导老师批阅，以免影响个人成绩）；2.实习鉴定表（需要实习单位盖章，请拍照后插入至实习报告中完成提交，纸质材料需要装入个人档案袋，请认真对待）",
+    "noticePublishedAt": "2026-08-28T09:00:00+08:00",
+    "timezone": "Asia/Shanghai"
+  },
+  "coverage": ["text", "multiple-tasks", "conditional", "shared-deadline", "task-dependencies", "real-notice-task-decomposition"],
+  "expected": {
+    "category": "required-action",
+    "changeIntent": "none",
+    "taskCount": 2,
+    "tasks": [
+      { "title": "完成校友邦上的实习任务", "evidence": ["完成校友邦上的所有任务"] },
+      { "title": "提交实习纸质材料（8月31日下午上课前）", "deadlineExpression": "8月31日下午上课前", "evidence": ["8月31日下午上课前需要提交以下纸质材料", "实习手册", "实习鉴定表", "从校友邦导出", "带有导师的评语", "如无评语，请联系指导老师批阅", "需要实习单位盖章", "请拍照后插入至实习报告中完成提交", "纸质材料需要装入个人档案袋"] }
+    ],
+    "uncertainties": ["上课前的具体时刻需要根据课程安排确认"]
+  }
+}

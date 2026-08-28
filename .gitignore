@@ -15,6 +15,9 @@ src-tauri/target/
 src-tauri/gen/schemas/
 .cargo-home/
 .local-build/
+.corepack/
+.rustup-home/
+.npm-cache/
 
 # Environment variables and secrets
 .env

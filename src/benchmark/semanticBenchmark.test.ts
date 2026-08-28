@@ -21,6 +21,11 @@ describe("semantic model benchmark report", () => {
       expect(candidate.taskCountAccuracy).toBeGreaterThanOrEqual(0);
       expect(candidate.fieldF1).toBeGreaterThanOrEqual(0);
       expect(candidate.evidenceGroundingRate).toBeGreaterThanOrEqual(0);
+      expect(candidate.actionRecall).toBeGreaterThanOrEqual(0);
+      expect(candidate.backgroundFalsePositiveRate).toBeGreaterThanOrEqual(0);
+      expect(candidate.dependencyAccuracy).toBeGreaterThanOrEqual(0);
+      expect(candidate.timeParsingAccuracy).toBeGreaterThanOrEqual(0);
+      expect(candidate.evidenceComplianceRate).toBeGreaterThanOrEqual(0);
       expect(candidate.meanElapsedMs).toBeGreaterThan(0);
       expect(candidate.peakMemoryMb).toBeGreaterThan(0);
       expect(candidate.modelSizeMb).toBeGreaterThan(1000);

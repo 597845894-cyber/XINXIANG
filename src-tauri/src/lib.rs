@@ -286,6 +286,7 @@ fn set_notice_state(app: AppHandle, notice_id: String, state: NoticeStateV1) -> 
 fn analyze_notice(
     app: AppHandle,
     notice_id: String,
+    summary_mode: Option<String>,
 ) -> Result<understanding::AnalysisResultV1, String> {
     let _queue_guard = analysis_queue()
         .lock()
@@ -329,20 +330,23 @@ fn analyze_notice(
                     thread::sleep(Duration::from_millis(25));
                 }
             });
-            let model_result = selected_manifest().ok().and_then(|manifest| {
-                let root = install_root(&manifest.selection_id);
-                (inspect_resources(&root, &manifest).state
-                    == model_resources::ModelResourceState::Available)
-                    .then(|| {
-                        let adapter = local_inference::LocalInferenceAdapter::from_root(root);
-                        let prompt = understanding::build_model_prompt(
-                            &text,
-                            &published_at,
-                            "Asia/Shanghai",
-                        );
-                        adapter.analyze(&prompt, Duration::from_secs(90), cancellation.clone())
-                    })
-            });
+            let model_result = (summary_mode.as_deref() != Some("flat_legacy"))
+                .then(|| ())
+                .and_then(|_| selected_manifest().ok())
+                .and_then(|manifest| {
+                    let root = install_root(&manifest.selection_id);
+                    (inspect_resources(&root, &manifest).state
+                        == model_resources::ModelResourceState::Available)
+                        .then(|| {
+                            let adapter = local_inference::LocalInferenceAdapter::from_root(root);
+                            let prompt = understanding::build_model_prompt(
+                                &text,
+                                &published_at,
+                                "Asia/Shanghai",
+                            );
+                            adapter.analyze(&prompt, Duration::from_secs(90), cancellation.clone())
+                        })
+                });
             cancellation.store(true, Ordering::Relaxed);
             let _ = monitor.join();
             match model_result {
@@ -360,7 +364,12 @@ fn analyze_notice(
                 {
                     Err(understanding::UnderstandingError::ModelCancelled)
                 }
-                _ => understanding::analyze_text(&text, &published_at, revision_id.clone()),
+                _ => understanding::analyze_text_with_mode(
+                    &text,
+                    &published_at,
+                    revision_id.clone(),
+                    summary_mode.as_deref() != Some("flat_legacy"),
+                ),
             }
         }
     };

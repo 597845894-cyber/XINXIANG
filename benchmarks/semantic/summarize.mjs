@@ -66,6 +66,40 @@ function fieldF1(expectedTasks, actualTasks) {
   return precision + recall ? (2 * precision * recall) / (precision + recall) : 0;
 }
 
+function taskMatches(expectedTask, actualTask) {
+  const expectedTitle = normalize(expectedTask.title);
+  const actualTitle = normalize(actualTask.title);
+  return expectedTitle === actualTitle || expectedTitle.includes(actualTitle) || actualTitle.includes(expectedTitle);
+}
+
+function extendedMetrics(fixture, actualTasks) {
+  const expectedTasks = fixture.expected.tasks;
+  const matchedExpected = expectedTasks.filter((expectedTask) => actualTasks.some((actual) => taskMatches(expectedTask, actual)));
+  const actionRecall = expectedTasks.length ? matchedExpected.length / expectedTasks.length : 1;
+  const backgroundMarkers = ["以免影响", "请认真对待", "各位同学上午好", "即将结束"];
+  const backgroundFalsePositives = actualTasks.filter((task) => backgroundMarkers.some((marker) => normalize(task.title).includes(normalize(marker))));
+  const backgroundFalsePositiveRate = actualTasks.length ? backgroundFalsePositives.length / actualTasks.length : 0;
+  const relationExpected = expectedTasks.filter((task) => task.relation || task.parentId || task.condition);
+  const relationMatches = relationExpected.filter((expectedTask) => actualTasks.some((actual) => taskMatches(expectedTask, actual) &&
+    (!expectedTask.condition || normalize(actual.condition) === normalize(expectedTask.condition)) &&
+    (!expectedTask.relation || actual.relation === expectedTask.relation)));
+  const dependencyAccuracy = relationExpected.length ? relationMatches.length / relationExpected.length : 1;
+  const timed = expectedTasks.filter((task) => task.deadlineExpression);
+  const timedMatches = timed.filter((expectedTask) => actualTasks.some((actual) => taskMatches(expectedTask, actual) && normalize(actual.timeExpression).includes(normalize(expectedTask.deadlineExpression))));
+  const timeAccuracy = timed.length ? timedMatches.length / timed.length : 1;
+  const evidence = actualTasks.flatMap((task) => task.evidence ?? []);
+  const expectedCount = fixture.expected.taskCount;
+  const aggregationAccuracy = actualTasks.length === expectedCount ? 1 : 0;
+  const timeNeedsReviewRate = actualTasks.length
+    ? actualTasks.filter((task) => task.needsConfirmation || (!task.dueAt && task.timeExpression)).length / actualTasks.length
+    : 0;
+  const detailExpected = expectedTasks.flatMap((task) => task.detailActions ?? []);
+  const detailCoverage = detailExpected.length
+    ? detailExpected.filter((item) => actualTasks.some((task) => (task.detailActions ?? []).includes(item))).length / detailExpected.length
+    : 1;
+  return { aggregationAccuracy, candidateCount: actualTasks.length, actionRecall, backgroundFalsePositiveRate, dependencyAccuracy, timeAccuracy, evidenceCompliance: evidence.length ? evidence.every((item) => (fixture.input.text ?? "").includes(item)) ? 1 : 0 : 1, timeNeedsReviewRate, detailCoverage };
+}
+
 async function main() {
   const args = parseArguments(process.argv.slice(2));
   const repoRoot = resolve(import.meta.dirname, "../..");
@@ -82,11 +116,13 @@ async function main() {
       const fixture = expected.get(sample.sampleId);
       const source = fixture.input.text ?? fixture.input.referenceText;
       const evidence = sample.output.tasks.flatMap((task) => task.evidence);
+      const extended = extendedMetrics(fixture, sample.output.tasks);
       return {
         category: sample.output.category === fixture.expected.category ? 1 : 0,
         taskCount: sample.output.tasks.length === fixture.expected.taskCount ? 1 : 0,
         field: fieldF1(fixture.expected.tasks, sample.output.tasks),
         grounded: evidence.every((item) => source.includes(item)) ? 1 : 0,
+      ...extended,
       };
     });
     summaries.push({
@@ -97,6 +133,14 @@ async function main() {
       taskCountAccuracy: round(mean(metrics.map((metric) => metric.taskCount))),
       fieldF1: round(mean(metrics.map((metric) => metric.field))),
       evidenceGroundingRate: round(mean(metrics.map((metric) => metric.grounded))),
+      actionRecall: round(mean(metrics.map((metric) => metric.actionRecall))),
+      backgroundFalsePositiveRate: round(mean(metrics.map((metric) => metric.backgroundFalsePositiveRate))),
+      dependencyAccuracy: round(mean(metrics.map((metric) => metric.dependencyAccuracy))),
+      timeParsingAccuracy: round(mean(metrics.map((metric) => metric.timeAccuracy))),
+      evidenceComplianceRate: round(mean(metrics.map((metric) => metric.evidenceCompliance))),
+      aggregationAccuracy: round(mean(metrics.map((metric) => metric.aggregationAccuracy))),
+      timeNeedsReviewRate: round(mean(metrics.map((metric) => metric.timeNeedsReviewRate))),
+      detailCoverage: round(mean(metrics.map((metric) => metric.detailCoverage))),
       meanElapsedMs: round(mean(result.samples.map((sample) => sample.elapsedMs)), 3),
       maxElapsedMs: round(Math.max(...result.samples.map((sample) => sample.elapsedMs)), 3),
       peakMemoryMb: result.peakMemoryMb,

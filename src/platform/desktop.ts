@@ -82,9 +82,14 @@ export async function setNoticeState(noticeId: string, state: NoticeState): Prom
 export async function analyzeNotice(
   noticeId: string,
   manualText?: string,
+  summaryMode?: "aggregated" | "flat_legacy",
 ): Promise<AnalysisResultV1 | null> {
   if (!isDesktopRuntime()) return null;
-  return invoke<AnalysisResultV1>("analyze_notice", { noticeId, manualText: manualText ?? null });
+  return invoke<AnalysisResultV1>("analyze_notice", {
+    noticeId,
+    manualText: manualText ?? null,
+    summaryMode: summaryMode ?? "aggregated",
+  });
 }
 
 export async function cancelAnalysis(noticeId: string): Promise<void> {

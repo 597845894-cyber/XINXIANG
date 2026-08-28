@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 2,
+  "id": "text-no-date",
+  "input": { "kind": "text", "noticePublishedAt": "2026-08-28T09:00:00+08:00", "timezone": "Asia/Shanghai", "text": "请记得携带学生证参加实验室安全培训。" },
+  "coverage": ["text", "missing-time"],
+  "expected": { "category": "required-action", "changeIntent": "none", "taskCount": 1, "tasks": [{ "title": "携带学生证参加安全培训", "evidence": ["携带学生证参加实验室安全培训"] }], "uncertainties": ["截止时间未提供"] }
+}

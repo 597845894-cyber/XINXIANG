@@ -315,7 +315,8 @@ function InboxView({ openImport, openTasks }: { openImport: () => void; openTask
     setAnalysisProgress(0);
     setError("");
     try {
-      const result = await analyzeNotice(detail.id, manualText);
+      const summaryMode = localStorage.getItem("task_summary_mode") === "flat_legacy" ? "flat_legacy" : "aggregated";
+      const result = await analyzeNotice(detail.id, manualText, summaryMode);
       setAnalysis(result);
       const nextRevisions = await listAnalysisRevisions(detail.id);
       setRevisions(nextRevisions ?? []);
@@ -528,16 +529,34 @@ function InboxView({ openImport, openTasks }: { openImport: () => void; openTask
                         className="candidate-card"
                       >
                         <strong>{candidate.title}</strong>
+                        {candidate.relation && candidate.relation !== "standalone" ? (
+                          <small className="candidate-relation">
+                            {candidate.relation === "parent"
+                              ? "汇总任务"
+                              : candidate.relation === "conditional"
+                                ? `条件：${candidate.condition ?? "需确认"}`
+                                : "准备步骤"}
+                          </small>
+                        ) : null}
                         <span>
                           {candidate.dueAt
                             ? new Date(candidate.dueAt).toLocaleString()
                             : "时间待确认"}
                         </span>
                         <em>{candidate.status === "trusted" ? "可快速核对" : "需要核对"}</em>
+                        {candidate.aggregationNote ? (
+                          <small className="candidate-detail">聚合说明：{candidate.aggregationNote}</small>
+                        ) : null}
+                        {candidate.detailActions?.length ? (
+                          <small className="candidate-detail">包含：{candidate.detailActions.join("；")}</small>
+                        ) : null}
                         {candidate.evidence.length ? (
                           <small className="candidate-evidence">
                             依据：{candidate.evidence.join("；")}
                           </small>
+                        ) : null}
+                        {candidate.timeResolutionStatus === "needsReview" ? (
+                          <small className="candidate-warning">时间表达需要确认：{candidate.dueExpression}</small>
                         ) : null}
                       </article>
                     ))}
@@ -909,6 +928,10 @@ function ReviewView() {
 
   async function confirmCandidate() {
     if (!selected) return;
+    if (selected.payload.status !== "trusted" || selected.payload.timeResolutionStatus === "needsReview" || selected.payload.timeResolutionStatus === "conflict") {
+      setMessage("该候选仍需要核对时间、证据或字段，确认前请先保存人工修改。" );
+      return;
+    }
     try {
       await confirmTaskCandidate(selected.id, {
         ...selected.payload,
@@ -1028,9 +1051,10 @@ function ReviewView() {
           <span />
         </div>
         {candidates.length ? (
-          candidates.map((candidate) => (
+          [...candidates].sort((left, right) => Number(Boolean(left.payload.parentId)) - Number(Boolean(right.payload.parentId))).map((candidate) => (
             <button
               className={`table-row ${selected?.id === candidate.id ? "is-selected" : ""}`}
+              style={{ paddingLeft: candidate.payload.parentId ? 32 : undefined }}
               key={candidate.id}
               onClick={() => selectCandidate(candidate)}
               type="button"
@@ -1101,12 +1125,28 @@ function ReviewView() {
             <div>
               <span>是否必须</span>
               <strong>
-                {selected.payload.required === null
+            {selected.payload.required === null
                   ? "待确认"
                   : selected.payload.required
                     ? "必须完成"
                     : "自愿参与"}
               </strong>
+            </div>
+            <div>
+              <span>关系</span>
+              <strong>
+                {selected.payload.relation === "parent"
+                  ? "汇总任务"
+                  : selected.payload.relation === "conditional"
+                    ? `条件任务：${selected.payload.condition ?? "待确认"}`
+                    : selected.payload.relation === "preparation"
+                      ? "准备步骤"
+                      : "独立任务"}
+              </strong>
+            </div>
+            <div>
+              <span>共享时间</span>
+              <strong>{selected.payload.dueExpression ?? "未设置"}</strong>
             </div>
           </div>
           <div className="evidence-panel">
@@ -1115,6 +1155,18 @@ function ReviewView() {
               <p key={evidence}>{evidence}</p>
             ))}
           </div>
+          {selected.payload.aggregationNote ? (
+            <div className="evidence-panel aggregation-panel">
+              <strong>聚合说明</strong>
+              <p>{selected.payload.aggregationNote}</p>
+              {selected.payload.detailActions?.length ? (
+                <p>详情动作：{selected.payload.detailActions.join("；")}</p>
+              ) : null}
+            </div>
+          ) : null}
+          {selected.payload.needsConfirmation ? (
+            <p className="candidate-warning">待确认：{selected.payload.dueExpression ?? "证据或字段仍需人工核对"}</p>
+          ) : null}
           {relations.length ? (
             <div className="relation-panel" aria-label="通知关联建议">
               <strong>通知关联建议</strong>
@@ -1259,16 +1311,17 @@ function TasksView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function visible(task: TaskViewV1) {
-    if (filter === "全部任务") return true;
-    if (filter === "已完成") return task.state === "completed";
+  function matchesFilter(task: TaskViewV1, selectedFilter: string) {
+    if (task.state === "cancelled") return false;
+    if (selectedFilter === "全部任务") return true;
+    if (selectedFilter === "已完成") return task.state === "completed";
     if (task.state !== "todo") return false;
-    if (filter === "无确定日期") return !task.payload.dueAt;
+    if (selectedFilter === "无确定日期") return !task.payload.dueAt;
     if (!task.payload.dueAt) return false;
     const due = new Date(task.payload.dueAt);
     const now = new Date();
-    if (filter === "今天") return due.toDateString() === now.toDateString();
-    if (filter === "本周") {
+    if (selectedFilter === "今天") return due.toDateString() === now.toDateString();
+    if (selectedFilter === "本周") {
       const weekStart = new Date(now);
       const day = weekStart.getDay() || 7;
       weekStart.setHours(0, 0, 0, 0);
@@ -1278,6 +1331,10 @@ function TasksView() {
       return due >= weekStart && due < weekEnd;
     }
     return due.getTime() >= now.getTime() && due.getTime() - now.getTime() < 3 * 86400000;
+  }
+
+  function visible(task: TaskViewV1) {
+    return matchesFilter(task, filter);
   }
 
   async function toggle(task: TaskViewV1) {
@@ -1425,15 +1482,7 @@ function TasksView() {
               <span>{label}</span>
               <span>
                 {
-                  tasks.filter(
-                    (task) =>
-                      label === "全部任务" ||
-                      (label === "已完成"
-                        ? task.state === "completed"
-                        : label === "无确定日期"
-                          ? task.state === "todo" && !task.payload.dueAt
-                          : true),
-                  ).length
+                  tasks.filter((task) => matchesFilter(task, label)).length
                 }
               </span>
             </button>
@@ -1575,7 +1624,12 @@ function TasksView() {
               );
             })}
           {!tasks.filter(visible).length ? (
-            <p className="empty-notice">当前视图没有任务。</p>
+            <div className="empty-notice">
+              <p>{tasks.filter((task) => matchesFilter(task, "全部任务")).length ? "当前视图没有匹配任务。" : "还没有正式任务。请先在任务核对中确认候选，或新建个人任务。"}</p>
+              {tasks.filter((task) => matchesFilter(task, "全部任务")).length && filter !== "全部任务" ? (
+                <button className="secondary-button" onClick={() => setFilter("全部任务")} type="button">查看全部任务</button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>
@@ -1585,6 +1639,9 @@ function TasksView() {
 }
 
 function SettingsView() {
+  const [taskSummaryMode, setTaskSummaryMode] = useState<"aggregated" | "flat_legacy">(
+    () => (localStorage.getItem("task_summary_mode") === "flat_legacy" ? "flat_legacy" : "aggregated"),
+  );
   const [securityStatus, setSecurityStatus] = useState<"idle" | "checking" | "verified" | "failed">(
     "idle",
   );
@@ -1679,6 +1736,25 @@ function SettingsView() {
         <h2 id="settings-title">设置</h2>
       </div>
       <div className="settings-sections">
+        <section>
+          <div className="settings-icon"><Sparkles size={20} /></div>
+          <div className="setting-copy">
+            <h3>通知任务摘要</h3>
+            <p>聚合模式按主要目标生成任务；回退模式仅影响之后重新分析，不修改历史数据。</p>
+          </div>
+          <select
+            aria-label="通知任务摘要模式"
+            value={taskSummaryMode}
+            onChange={(event) => {
+              const mode = event.target.value === "flat_legacy" ? "flat_legacy" : "aggregated";
+              setTaskSummaryMode(mode);
+              localStorage.setItem("task_summary_mode", mode);
+            }}
+          >
+            <option value="aggregated">聚合摘要</option>
+            <option value="flat_legacy">旧版扁平</option>
+          </select>
+        </section>
         <section>
           <div className="settings-icon">
             <MonitorCog size={20} />

@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 2,
+  "id": "text-single-task",
+  "input": { "kind": "text", "noticePublishedAt": "2026-08-28T09:00:00+08:00", "timezone": "Asia/Shanghai", "text": "请在9月2日18:00前完成问卷填写。" },
+  "coverage": ["text"],
+  "expected": { "category": "required-action", "changeIntent": "none", "taskCount": 1, "tasks": [{ "title": "完成问卷填写", "deadlineExpression": "9月2日18:00前", "evidence": ["9月2日18:00前完成问卷填写"] }], "uncertainties": [] }
+}

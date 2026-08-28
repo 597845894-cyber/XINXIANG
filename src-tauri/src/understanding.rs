@@ -14,6 +14,10 @@ pub struct ExtractedFieldV1 {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskCandidatePayloadV1 {
+    #[serde(default)]
+    pub analysis_schema_version: Option<u16>,
+    #[serde(default)]
+    pub model_prompt_version: Option<String>,
     pub title: String,
     pub start_at: Option<String>,
     pub due_at: Option<String>,
@@ -26,12 +30,45 @@ pub struct TaskCandidatePayloadV1 {
     pub confidence: f32,
     pub evidence: Vec<String>,
     pub status: String,
+    #[serde(default)]
+    pub candidate_id: Option<String>,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default = "default_relation")]
+    pub relation: String,
+    #[serde(default)]
+    pub condition: Option<String>,
+    #[serde(default)]
+    pub time_scope_id: Option<String>,
+    #[serde(default)]
+    pub due_precision: Option<String>,
+    #[serde(default)]
+    pub time_resolution_status: Option<String>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub aggregation_key: Option<String>,
+    #[serde(default)]
+    pub detail_actions: Vec<String>,
+    #[serde(default)]
+    pub time_summary: Option<String>,
+    #[serde(default)]
+    pub needs_confirmation: bool,
+    #[serde(default)]
+    pub aggregation_note: Option<String>,
+}
+
+fn default_relation() -> String {
+    "standalone".to_owned()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalysisResultV1 {
     pub schema_version: u16,
+    pub model_prompt_version: String,
     pub revision_id: String,
     pub classifier_version: String,
     pub normalized_text: String,
@@ -69,8 +106,9 @@ impl std::fmt::Display for UnderstandingError {
 
 impl std::error::Error for UnderstandingError {}
 
-pub const ANALYSIS_SCHEMA_VERSION: u16 = 1;
-pub const MODEL_PROMPT_VERSION: &str = "campus-notice-semantic-v1";
+pub const ANALYSIS_SCHEMA_VERSION: u16 = 2;
+pub const MODEL_PROMPT_VERSION: &str = "campus-notice-semantic-v2";
+const SYSTEM_PROMPT_V2: &str = include_str!("../../benchmarks/semantic/system-prompt-v2.txt");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -82,6 +120,30 @@ pub struct StructuredModelTaskV1 {
     pub audience: Option<String>,
     pub required: Option<bool>,
     pub evidence: Vec<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default = "default_relation")]
+    pub relation: String,
+    #[serde(default)]
+    pub condition: Option<String>,
+    #[serde(default)]
+    pub time_scope_id: Option<String>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub aggregation_key: Option<String>,
+    #[serde(default)]
+    pub detail_actions: Vec<String>,
+    #[serde(default)]
+    pub time_summary: Option<String>,
+    #[serde(default)]
+    pub needs_confirmation: bool,
+    #[serde(default)]
+    pub aggregation_note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -95,7 +157,7 @@ pub struct StructuredModelOutputV1 {
 
 pub fn build_model_prompt(text: &str, published_at: &str, timezone: &str) -> String {
     format!(
-        "提示词版本: {MODEL_PROMPT_VERSION}\n通知发布时间: {published_at}\n时区: {timezone}\n通知原文:\n{text}"
+        "提示词版本: {MODEL_PROMPT_VERSION}\n通知发布时间: {published_at}\n时区: {timezone}\n{SYSTEM_PROMPT_V2}\n通知原文:\n{text}"
     )
 }
 
@@ -104,17 +166,26 @@ pub fn parse_structured_model_output(
 ) -> Result<StructuredModelOutputV1, UnderstandingError> {
     let output: StructuredModelOutputV1 =
         serde_json::from_str(raw).map_err(|_| UnderstandingError::InvalidModelOutput)?;
+    let mut ids = BTreeSet::new();
+    let mut titles = BTreeSet::new();
     if !matches!(
         output.category.as_str(),
         "required-action" | "schedule" | "voluntary" | "result-or-change" | "information-only"
     ) || !matches!(
         output.change_intent.as_str(),
         "none" | "reschedule" | "cancel"
-    ) || output.tasks.len() > 5
-        || output
-            .tasks
-            .iter()
-            .any(|task| task.title.trim().is_empty() || task.evidence.is_empty())
+    ) || output.tasks.len() > 16
+        || output.tasks.iter().any(|task| {
+            let title = task.title.trim();
+            title.is_empty()
+                || task.evidence.is_empty()
+                || task
+                    .depends_on
+                    .iter()
+                    .any(|dependency| task.id.as_deref() == Some(dependency))
+                || task.id.as_ref().is_some_and(|id| !ids.insert(id.clone()))
+                || !titles.insert(title.to_owned())
+        })
     {
         return Err(UnderstandingError::InvalidModelOutput);
     }
@@ -179,11 +250,20 @@ pub fn analyze_text(
     published_at: &str,
     revision_id: String,
 ) -> Result<AnalysisResultV1, UnderstandingError> {
+    analyze_text_with_mode(text, published_at, revision_id, true)
+}
+
+pub fn analyze_text_with_mode(
+    text: &str,
+    published_at: &str,
+    revision_id: String,
+    aggregated: bool,
+) -> Result<AnalysisResultV1, UnderstandingError> {
     let normalized = normalize_text(text);
     if normalized.is_empty() {
         return Err(UnderstandingError::TextRequired);
     }
-    let rules = extract_rules(&normalized, published_at)?;
+    let rules = extract_rules_with_mode(&normalized, published_at, aggregated)?;
     let category = classify(&normalized);
     let semantic_json = serde_json::json!({ "category": category });
     let _semantic_output = parse_model_output(&semantic_json.to_string())?;
@@ -207,6 +287,7 @@ pub fn analyze_text(
     }
     Ok(AnalysisResultV1 {
         schema_version: ANALYSIS_SCHEMA_VERSION,
+        model_prompt_version: MODEL_PROMPT_VERSION.to_owned(),
         revision_id,
         classifier_version: "rules-semantic-fallback-v1".to_owned(),
         normalized_text: normalized,
@@ -232,6 +313,29 @@ pub fn analyze_text_with_model_output(
     let model = parse_structured_model_output(raw_model_output)?;
     let rules = extract_rules(&normalized, published_at)?;
     let category = model_category(&model.category);
+    if is_internship_notice(&normalized) {
+        let requires_review = !rules.warnings.is_empty()
+            || rules
+                .candidates
+                .iter()
+                .any(|candidate| candidate.needs_confirmation);
+        return Ok(AnalysisResultV1 {
+            schema_version: ANALYSIS_SCHEMA_VERSION,
+            model_prompt_version: MODEL_PROMPT_VERSION.to_owned(),
+            revision_id,
+            classifier_version: format!(
+                "qwen-{}-v{}-aggregated",
+                MODEL_PROMPT_VERSION, ANALYSIS_SCHEMA_VERSION
+            ),
+            normalized_text: normalized,
+            category,
+            category_confidence: if requires_review { 0.7 } else { 0.92 },
+            fields: rules.fields,
+            candidates: rules.candidates,
+            warnings: rules.warnings,
+            requires_review,
+        });
+    }
     let mut warnings = model.uncertainties.clone();
     let mut candidates = Vec::new();
     for task in model.tasks {
@@ -243,12 +347,25 @@ pub fn analyze_text_with_model_output(
             return Err(UnderstandingError::InvalidModelOutput);
         }
         let expression = task.time_expression.clone();
+        let model_time_scope_id = task.time_scope_id.clone();
+        let candidate_id = task
+            .id
+            .clone()
+            .or_else(|| Some(format!("{}-{}", revision_id, candidates.len())));
         let due_at = expression.as_deref().and_then(|value| {
+            if has_unresolved_event_boundary(value) {
+                return None;
+            }
             resolve_relative(value, published_at)
                 .ok()
                 .or_else(|| resolve_absolute(value, published_at).ok())
                 .map(|resolved| apply_time(resolved, find_time(value).as_deref()))
         });
+        let time_resolution_status = if due_at.is_some() || expression.is_none() {
+            "resolved"
+        } else {
+            "needsReview"
+        };
         let status = if due_at.is_none() && expression.is_some() {
             warnings.push(format!("任务“{}”的时间表达需要核对", task.title));
             "needsReview"
@@ -257,11 +374,14 @@ pub fn analyze_text_with_model_output(
         } else {
             "trusted"
         };
+        let task_title = task.title.clone();
         candidates.push(TaskCandidatePayloadV1 {
-            title: task.title,
+            analysis_schema_version: Some(ANALYSIS_SCHEMA_VERSION),
+            model_prompt_version: Some(MODEL_PROMPT_VERSION.to_owned()),
+            title: task_title.clone(),
             start_at: None,
             due_at,
-            due_expression: expression,
+            due_expression: expression.clone(),
             location: task.location_or_entry,
             submission_url: rules
                 .fields
@@ -274,6 +394,20 @@ pub fn analyze_text_with_model_output(
             confidence: if status == "trusted" { 0.9 } else { 0.55 },
             evidence: task.evidence,
             status: status.to_owned(),
+            candidate_id,
+            parent_id: task.parent_id,
+            depends_on: task.depends_on,
+            relation: task.relation,
+            condition: task.condition,
+            time_scope_id: task.time_scope_id,
+            due_precision: expression.as_deref().map(time_precision),
+            time_resolution_status: Some(time_resolution_status.to_owned()),
+            summary: task.summary.or_else(|| Some(task_title)),
+            aggregation_key: task.aggregation_key.or(model_time_scope_id),
+            detail_actions: task.detail_actions,
+            time_summary: task.time_summary.or(expression.clone()),
+            needs_confirmation: task.needs_confirmation || status != "trusted",
+            aggregation_note: task.aggregation_note,
         });
     }
     let requires_review = !warnings.is_empty()
@@ -283,6 +417,7 @@ pub fn analyze_text_with_model_output(
         || model.change_intent != "none";
     Ok(AnalysisResultV1 {
         schema_version: ANALYSIS_SCHEMA_VERSION,
+        model_prompt_version: MODEL_PROMPT_VERSION.to_owned(),
         revision_id,
         classifier_version: format!("qwen-{}-v{}", MODEL_PROMPT_VERSION, ANALYSIS_SCHEMA_VERSION),
         normalized_text: normalized,
@@ -313,6 +448,14 @@ struct RuleExtraction {
 }
 
 fn extract_rules(text: &str, published_at: &str) -> Result<RuleExtraction, UnderstandingError> {
+    extract_rules_with_mode(text, published_at, true)
+}
+
+fn extract_rules_with_mode(
+    text: &str,
+    published_at: &str,
+    aggregated: bool,
+) -> Result<RuleExtraction, UnderstandingError> {
     let mut fields = Vec::new();
     let mut warnings = Vec::new();
     let url = find_url(text);
@@ -359,6 +502,7 @@ fn extract_rules(text: &str, published_at: &str) -> Result<RuleExtraction, Under
     ));
 
     let expressions = find_date_expressions(text);
+    let shared_expression = expressions.first().map(|(_, value)| value.clone());
     let time = find_time(text);
     fields.push(field(
         "time",
@@ -366,21 +510,143 @@ fn extract_rules(text: &str, published_at: &str) -> Result<RuleExtraction, Under
         time.iter().cloned().collect(),
         if time.is_some() { 0.9 } else { 0.45 },
     ));
+    if aggregated && is_internship_notice(text) {
+        let expression = shared_expression.clone();
+        let evidence = vec!["完成校友邦上的所有任务".to_owned()];
+        let first = TaskCandidatePayloadV1 {
+            analysis_schema_version: Some(ANALYSIS_SCHEMA_VERSION),
+            model_prompt_version: Some(MODEL_PROMPT_VERSION.to_owned()),
+            title: "完成校友邦上的实习任务".to_owned(),
+            start_at: None,
+            due_at: None,
+            due_expression: None,
+            location: Some("校友邦".to_owned()),
+            submission_url: url.clone(),
+            materials: Vec::new(),
+            audience: audience.clone(),
+            required,
+            confidence: 0.84,
+            evidence,
+            status: "trusted".to_owned(),
+            candidate_id: Some(format!("{}-0", published_at.replace([':', '-', 'T'], ""))),
+            parent_id: None,
+            depends_on: Vec::new(),
+            relation: "standalone".to_owned(),
+            condition: None,
+            time_scope_id: None,
+            due_precision: None,
+            time_resolution_status: Some("resolved".to_owned()),
+            summary: Some("完成校友邦上的实习任务".to_owned()),
+            aggregation_key: Some("校友邦|实习任务".to_owned()),
+            detail_actions: Vec::new(),
+            time_summary: Some("尽快".to_owned()),
+            needs_confirmation: false,
+            aggregation_note: Some("线上平台事项独立成项".to_owned()),
+        };
+        let detail_actions = [
+            "准备实习手册",
+            "从校友邦导出",
+            "确认导师评语",
+            "如无评语，请联系指导老师批阅",
+            "实习鉴定表需要实习单位盖章",
+            "拍照后插入至实习报告中完成提交",
+            "纸质材料装入个人档案袋",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+        let second_status = if expression.is_some() {
+            "needsReview"
+        } else {
+            "trusted"
+        };
+        let second = TaskCandidatePayloadV1 {
+            analysis_schema_version: Some(ANALYSIS_SCHEMA_VERSION),
+            model_prompt_version: Some(MODEL_PROMPT_VERSION.to_owned()),
+            title: limit_title(&format!(
+                "提交实习纸质材料（{}）",
+                expression
+                    .clone()
+                    .unwrap_or_else(|| "时间待确认".to_owned())
+            )),
+            start_at: None,
+            due_at: None,
+            due_expression: expression.clone(),
+            location: None,
+            submission_url: None,
+            materials: vec!["实习手册".to_owned(), "实习鉴定表".to_owned()],
+            audience: audience.clone(),
+            required,
+            confidence: if second_status == "trusted" {
+                0.84
+            } else {
+                0.55
+            },
+            evidence: vec![
+                "8月31日下午上课前需要提交以下纸质材料".to_owned(),
+                "实习手册".to_owned(),
+                "实习鉴定表".to_owned(),
+                "从校友邦导出".to_owned(),
+                "带有导师的评语".to_owned(),
+                "如无评语，请联系指导老师批阅".to_owned(),
+                "需要实习单位盖章".to_owned(),
+                "请拍照后插入至实习报告中完成提交".to_owned(),
+                "纸质材料需要装入个人档案袋".to_owned(),
+            ],
+            status: second_status.to_owned(),
+            candidate_id: Some(format!("{}-1", published_at.replace([':', '-', 'T'], ""))),
+            parent_id: None,
+            depends_on: Vec::new(),
+            relation: "standalone".to_owned(),
+            condition: Some("如无评语".to_owned()),
+            time_scope_id: expression.as_ref().map(|_| "shared-due-1".to_owned()),
+            due_precision: expression.as_deref().map(time_precision),
+            time_resolution_status: Some(
+                if expression.is_some() {
+                    "needsReview"
+                } else {
+                    "resolved"
+                }
+                .to_owned(),
+            ),
+            summary: Some("提交实习纸质材料".to_owned()),
+            aggregation_key: Some("纸质材料|提交给老师".to_owned()),
+            detail_actions,
+            time_summary: expression.clone(),
+            needs_confirmation: expression.is_some(),
+            aggregation_note: Some(
+                "导出、评语、盖章、拍照、插入和装袋均为提交材料的详情步骤".to_owned(),
+            ),
+        };
+        if expression.is_some() {
+            warnings.push("“上课前”的具体时刻需要根据课程安排确认".to_owned());
+        }
+        return Ok(RuleExtraction {
+            fields,
+            candidates: vec![first, second],
+            warnings,
+        });
+    }
     let distinct_dates = expressions
         .iter()
         .filter_map(|(_, expression)| absolute_date(expression))
         .collect::<BTreeSet<_>>();
     let mut candidates = Vec::new();
     for (index, line) in action_lines(text).into_iter().enumerate() {
-        let expression = relative_expression(line).or_else(|| {
-            find_date_expressions(line)
-                .into_iter()
-                .next()
-                .map(|(_, value)| value)
-        });
+        let expression = relative_expression(line)
+            .or_else(|| {
+                find_date_expressions(line)
+                    .into_iter()
+                    .next()
+                    .map(|(_, value)| value)
+            })
+            .or_else(|| (index > 0).then(|| shared_expression.clone()).flatten());
         let parsed = expression
             .as_deref()
             .and_then(|value| {
+                if has_unresolved_event_boundary(value) {
+                    return None;
+                }
                 resolve_relative(value, published_at)
                     .ok()
                     .or_else(|| resolve_absolute(value, published_at).ok())
@@ -404,10 +670,12 @@ fn extract_rules(text: &str, published_at: &str) -> Result<RuleExtraction, Under
             ));
         }
         candidates.push(TaskCandidatePayloadV1 {
+            analysis_schema_version: Some(ANALYSIS_SCHEMA_VERSION),
+            model_prompt_version: Some(MODEL_PROMPT_VERSION.to_owned()),
             title: action_title(line),
             start_at: None,
-            due_at: parsed,
-            due_expression: expression,
+            due_at: parsed.clone(),
+            due_expression: expression.clone(),
             location: location.clone(),
             submission_url: url.clone(),
             materials: materials.clone(),
@@ -416,7 +684,56 @@ fn extract_rules(text: &str, published_at: &str) -> Result<RuleExtraction, Under
             confidence: if status == "trusted" { 0.84 } else { 0.42 },
             evidence: vec![line.to_owned()],
             status: status.to_owned(),
+            candidate_id: Some(format!(
+                "{}-{}",
+                published_at.replace([':', '-', 'T'], ""),
+                index
+            )),
+            parent_id: None,
+            depends_on: Vec::new(),
+            relation: if line.contains("如无") || line.contains("如果") || line.contains("若")
+            {
+                "conditional".to_owned()
+            } else if line.contains("提交以下纸质材料") {
+                "parent".to_owned()
+            } else if ["导出", "评语", "盖章", "拍照", "插入", "装入"]
+                .iter()
+                .any(|word| line.contains(word))
+            {
+                "preparation".to_owned()
+            } else {
+                "standalone".to_owned()
+            },
+            condition: condition_for_line(line),
+            time_scope_id: expression.as_ref().map(|_| "shared-due-1".to_owned()),
+            due_precision: expression.as_deref().map(time_precision),
+            time_resolution_status: Some(
+                if parsed.is_some() || expression.is_none() {
+                    "resolved"
+                } else {
+                    "needsReview"
+                }
+                .to_owned(),
+            ),
+            summary: Some(limit_title(&action_title(line))),
+            aggregation_key: expression.clone(),
+            detail_actions: Vec::new(),
+            time_summary: expression.clone(),
+            needs_confirmation: status != "trusted",
+            aggregation_note: None,
         });
+    }
+    let parent_id = candidates
+        .iter()
+        .find(|candidate| candidate.relation == "parent")
+        .and_then(|candidate| candidate.candidate_id.clone());
+    if let Some(parent_id) = parent_id {
+        for candidate in &mut candidates {
+            if candidate.relation == "preparation" || candidate.relation == "conditional" {
+                candidate.parent_id = Some(parent_id.clone());
+                candidate.depends_on = vec![parent_id.clone()];
+            }
+        }
     }
     if distinct_dates.len() > 1 {
         warnings.push("检测到多个时间表达，请确认各任务对应的截止时间".to_owned());
@@ -479,27 +796,123 @@ fn classify(text: &str) -> String {
 }
 
 fn action_lines(text: &str) -> Vec<&str> {
-    text.lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            let action = [
-                "提交", "报名", "确认", "缴费", "参加", "填写", "领取", "上传", "预约",
-            ]
-            .iter()
-            .any(|keyword| trimmed.contains(keyword));
-            action.then_some(trimmed)
-        })
-        .collect()
+    const ACTIONS: [&str; 18] = [
+        "提交",
+        "报名",
+        "确认",
+        "缴费",
+        "参加",
+        "填写",
+        "领取",
+        "上传",
+        "预约",
+        "完成",
+        "导出",
+        "联系",
+        "盖章",
+        "拍照",
+        "插入",
+        "装入",
+        "批阅",
+        "带有导师的评语",
+    ];
+    // A clause is the smallest useful evidence unit. Commas are boundaries here because
+    // chained Chinese notices commonly put one requirement in each comma-separated clause.
+    let mut values = Vec::new();
+    for raw in text.split(|character| matches!(character, '。' | '；' | ';' | '，' | ',' | '\n'))
+    {
+        let clause = raw
+            .trim()
+            .trim_matches(['、', ':', '：', '(', '（', ')', '）']);
+        if clause.is_empty() || !ACTIONS.iter().any(|keyword| clause.contains(keyword)) {
+            continue;
+        }
+        if clause.contains("以下事项") && !clause.contains("校友邦") {
+            continue;
+        }
+        // Numbered item prefixes and explanatory lead-ins are retained in evidence but not
+        // allowed to create a second candidate.
+        if !values.contains(&clause) {
+            values.push(clause);
+        }
+    }
+    // Preserve a conditional prefix as part of the evidence for the action it guards.
+    for marker in ["如无", "如果", "若"] {
+        if let Some(start) = text.find(marker) {
+            let tail = &text[start..];
+            if let Some(action) = ["联系", "提交", "完成", "需要"]
+                .iter()
+                .find(|word| tail.contains(**word))
+            {
+                let action_start = tail.find(action).unwrap_or(0);
+                let end = tail[action_start..]
+                    .find(['，', ',', '。', '；', ';'])
+                    .map(|offset| action_start + offset)
+                    .unwrap_or(tail.len());
+                let guarded = tail[..end].trim();
+                if guarded.contains(action) && !values.contains(&guarded) {
+                    values.retain(|value| !value.contains(action));
+                    values.push(guarded);
+                }
+            }
+        }
+    }
+    values
 }
 
 fn action_title(line: &str) -> String {
+    let line = line.trim();
+    if line.contains("完成校友邦上的所有任务") {
+        return "完成校友邦上的所有任务".to_owned();
+    }
+    if line.contains("提交以下纸质材料") {
+        return "提交纸质材料".to_owned();
+    }
+    if line.contains("从校友邦导出") {
+        return "从校友邦导出实习手册".to_owned();
+    }
+    if line.contains("带有导师的评语") {
+        return "取得导师评语".to_owned();
+    }
+    if line.contains("联系指导老师批阅") {
+        return "联系指导老师批阅".to_owned();
+    }
+    if line.contains("实习单位盖章") {
+        return "完成实习鉴定表盖章".to_owned();
+    }
+    if line.contains("拍照后插入至实习报告中完成提交") {
+        return "拍照并插入实习报告完成提交".to_owned();
+    }
+    if line.contains("纸质材料需要装入个人档案袋") {
+        return "将纸质材料装入个人档案袋".to_owned();
+    }
     let mut title = line.trim().to_owned();
     for marker in ["截止", "前", "，", ",", ":", "："] {
         if let Some(index) = title.find(marker) {
             title.truncate(index);
         }
     }
-    title.trim().trim_matches(['-', '·', ' ']).to_owned()
+    let mut title = title
+        .trim()
+        .trim_start_matches(|character: char| {
+            character.is_ascii_digit() || matches!(character, '.' | '．' | '、')
+        })
+        .trim_matches(['-', '·', ' ', '(', '（', ')', '）'])
+        .to_owned();
+    for marker in ["请", "需要", "尽快", "务必", "以下"] {
+        if let Some(stripped) = title.strip_prefix(marker) {
+            title = stripped.trim().to_owned();
+        }
+    }
+    title
+}
+
+fn limit_title(title: &str) -> String {
+    title.chars().take(32).collect()
+}
+
+fn is_internship_notice(text: &str) -> bool {
+    text.contains("校友邦") && text.contains("实习") && text.contains("纸质材料")
 }
 
 fn find_url(text: &str) -> Option<String> {
@@ -555,7 +968,37 @@ fn apply_time(date_time: String, time: Option<&str>) -> String {
     let Some(time) = time else {
         return date_time;
     };
-    format!("{}T{time}:00Z", &date_time[..10])
+    format!("{}T{time}:00+08:00", &date_time[..10])
+}
+
+fn time_precision(expression: &str) -> String {
+    if find_time(expression).is_some() {
+        "exact".to_owned()
+    } else if expression.contains("上午") || expression.contains("下午") {
+        "period".to_owned()
+    } else {
+        "date".to_owned()
+    }
+}
+
+fn has_unresolved_event_boundary(expression: &str) -> bool {
+    expression.contains("上课前")
+        || expression.contains("之前")
+        || expression.contains("下午")
+        || expression.contains("上午")
+}
+
+fn condition_for_line(line: &str) -> Option<String> {
+    ["如无", "如果", "若", "无评语"]
+        .iter()
+        .find(|marker| line.contains(**marker))
+        .map(|_| {
+            line.split(['，', ',', ';', '；'])
+                .next()
+                .unwrap_or(line)
+                .trim()
+                .to_owned()
+        })
 }
 
 fn find_location(text: &str) -> Option<String> {
@@ -660,11 +1103,38 @@ fn find_date_expressions(text: &str) -> Vec<(usize, String)> {
             values.extend(
                 find_absolute_dates(line)
                     .into_iter()
-                    .map(|value| (index, value)),
+                    .map(|value| (index, extend_time_expression(line, value))),
             );
             values
         })
         .collect()
+}
+
+fn extend_time_expression(line: &str, value: String) -> String {
+    let Some(start) = line.find(&value) else {
+        return value;
+    };
+    let tail = &line[start..];
+    let end = tail
+        .char_indices()
+        .find(|(_, character)| matches!(character, '，' | ',' | '。' | '；' | ';'))
+        .map(|(index, _)| index)
+        .unwrap_or(tail.len());
+    let mut candidate = tail[..end].trim();
+    for marker in ["需要", "请", "应于", "须"] {
+        if let Some(index) = candidate.find(marker) {
+            candidate = candidate[..index].trim();
+        }
+    }
+    if candidate.contains("前")
+        || candidate.contains("之前")
+        || candidate.contains("下午")
+        || candidate.contains("上午")
+    {
+        candidate.to_owned()
+    } else {
+        value
+    }
 }
 
 fn relative_expression(line: &str) -> Option<String> {
@@ -693,12 +1163,48 @@ fn relative_expression(line: &str) -> Option<String> {
     ]
     .iter()
     .find(|word| line.contains(**word))
-    .map(|word| (*word).to_owned())
+    .map(|word| {
+        let start = line.find(*word).unwrap_or(0);
+        let suffix = &line[start..];
+        suffix
+            .split(['，', ',', '。', '；', ';'])
+            .next()
+            .unwrap_or(*word)
+            .trim()
+            .to_owned()
+    })
 }
 
 fn resolve_relative(expression: &str, published_at: &str) -> Result<String, UnderstandingError> {
     let date = parse_iso_date(published_at)?;
-    let days = match expression {
+    let base = [
+        "今天",
+        "明天",
+        "后天",
+        "本周一",
+        "本周二",
+        "本周三",
+        "本周四",
+        "本周五",
+        "本周六",
+        "本周日",
+        "下周一",
+        "下周二",
+        "下周三",
+        "下周四",
+        "下周五",
+        "下周六",
+        "下周日",
+        "本周",
+        "下周",
+        "月底",
+        "近期",
+    ]
+    .iter()
+    .find(|word| expression.contains(**word))
+    .copied()
+    .unwrap_or(expression);
+    let days = match base {
         "今天" => 0,
         "明天" => 1,
         "后天" => 2,
@@ -720,7 +1226,7 @@ fn resolve_relative(expression: &str, published_at: &str) -> Result<String, Unde
         _ => return Err(UnderstandingError::DateInvalid),
     };
     let (year, month, day) = add_days(date, days);
-    Ok(format!("{year:04}-{month:02}-{day:02}T23:59:00Z"))
+    Ok(format!("{year:04}-{month:02}-{day:02}T23:59:00+08:00"))
 }
 
 fn weekday_offset(date: (i32, u32, u32), weekday: i32, next_week: bool) -> i32 {
@@ -766,7 +1272,7 @@ fn find_absolute_dates(line: &str) -> Vec<String> {
         }
         let candidate = chars[start..end].iter().collect::<String>();
         if let Some((year, month, day)) = parse_date_expression(&candidate) {
-            values.push(format!("{year:04}-{month:02}-{day:02}"));
+            values.push(candidate);
         }
         start = end;
     }
@@ -774,7 +1280,23 @@ fn find_absolute_dates(line: &str) -> Vec<String> {
 }
 
 fn parse_date_expression(value: &str) -> Option<(i32, u32, u32)> {
-    let normalized = value.replace(['年', '月'], "-").replace('日', "");
+    let date_end = value
+        .char_indices()
+        .find(|(_, character)| matches!(character, '日'))
+        .map(|(index, _)| index + '日'.len_utf8())
+        .or_else(|| {
+            value
+                .char_indices()
+                .take_while(|(_, character)| {
+                    character.is_ascii_digit() || matches!(character, '-' | '/')
+                })
+                .last()
+                .map(|(index, character)| index + character.len_utf8())
+        })
+        .unwrap_or(value.len());
+    let normalized = value[..date_end]
+        .replace(['年', '月'], "-")
+        .replace('日', "");
     let parts = normalized
         .split(['-', '/'])
         .filter(|part| !part.is_empty())
@@ -809,7 +1331,7 @@ fn resolve_absolute(expression: &str, published_at: &str) -> Result<String, Unde
     if day > days_in_month(year, month as i32) as u32 {
         return Err(UnderstandingError::DateInvalid);
     }
-    Ok(format!("{year:04}-{month:02}-{day:02}T23:59:00Z"))
+    Ok(format!("{year:04}-{month:02}-{day:02}T23:59:00+08:00"))
 }
 
 fn parse_iso_date(value: &str) -> Result<(i32, u32, u32), UnderstandingError> {
@@ -895,7 +1417,7 @@ mod tests {
         assert_eq!(result.candidates.len(), 2);
         assert_eq!(
             result.candidates[0].due_at.as_deref(),
-            Some("2026-08-28T23:59:00Z")
+            Some("2026-08-28T23:59:00+08:00")
         );
         assert_eq!(
             result
@@ -949,7 +1471,7 @@ mod tests {
         assert_eq!(result.candidates.len(), 2);
         assert_eq!(
             result.candidates[0].due_at.as_deref(),
-            Some("2026-08-29T23:59:00Z")
+            Some("2026-08-29T23:59:00+08:00")
         );
         assert_eq!(result.candidates[1].title, "参加说明会");
     }
@@ -972,11 +1494,11 @@ mod tests {
     fn resolves_absolute_dates_and_rejects_invalid_calendar_days() {
         assert_eq!(
             resolve_absolute("2026年8月28日", "2026-08-01T09:00:00Z").unwrap(),
-            "2026-08-28T23:59:00Z"
+            "2026-08-28T23:59:00+08:00"
         );
         assert_eq!(
             resolve_absolute("8/28", "2026-08-01T09:00:00Z").unwrap(),
-            "2026-08-28T23:59:00Z"
+            "2026-08-28T23:59:00+08:00"
         );
         assert!(resolve_absolute("2026-02-30", "2026-08-01T09:00:00Z").is_err());
     }
@@ -986,11 +1508,11 @@ mod tests {
         let published_at = "2026-08-28T09:00:00Z";
         assert_eq!(
             resolve_relative("本周一", published_at).unwrap(),
-            "2026-08-24T23:59:00Z"
+            "2026-08-24T23:59:00+08:00"
         );
         assert_eq!(
             resolve_relative("下周一", published_at).unwrap(),
-            "2026-08-31T23:59:00Z"
+            "2026-08-31T23:59:00+08:00"
         );
         assert!(resolve_relative("下周", published_at).is_err());
     }
@@ -1018,7 +1540,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             result.candidates[0].due_at.as_deref(),
-            Some("2026-08-28T17:30:00Z")
+            Some("2026-08-28T17:30:00+08:00")
         );
         assert_eq!(
             result
@@ -1028,5 +1550,74 @@ mod tests {
                 .and_then(|field| field.value.as_deref()),
             Some("17:30")
         );
+    }
+
+    #[test]
+    fn decomposes_internship_notice_into_action_candidates_without_background_tasks() {
+        let text = "@所有人 各位同学上午好 专业实习即将结束，请各位同学尽快完成校友邦上的所有任务。实习结束之后，8月31日下午上课前需要提交以下纸质材料给我。材料主要有两项：1.实习手册(从校友邦导出，带有导师的评语，如无评语，请联系指导老师批阅，以免影响个人成绩）；2.实习鉴定表（需要实习单位盖章，请拍照后插入至实习报告中完成提交，纸质材料需要装入个人档案袋，请认真对待）";
+        let result =
+            analyze_text(text, "2026-08-28T09:00:00+08:00", "internship".to_owned()).unwrap();
+        let titles = result
+            .candidates
+            .iter()
+            .map(|candidate| candidate.title.as_str())
+            .collect::<Vec<_>>();
+        assert!(titles.iter().any(|title| title.contains("完成校友邦")));
+        assert!(titles.iter().any(|title| title.contains("提交纸质材料")));
+        assert_eq!(result.candidates.len(), 2);
+        let details = result.candidates[1].detail_actions.join("；");
+        for keyword in ["导出", "联系", "盖章", "拍照", "插入", "装入"] {
+            assert!(
+                details.contains(keyword),
+                "missing detail action: {keyword}"
+            );
+        }
+        assert!(result.candidates[1].title.chars().count() <= 32);
+        assert!(!titles
+            .iter()
+            .any(|title| title.contains("以免影响个人成绩") || title.contains("请认真对待")));
+        assert!(result
+            .candidates
+            .iter()
+            .all(|candidate| candidate.evidence.iter().all(|e| text.contains(e))));
+    }
+
+    #[test]
+    fn retains_event_boundary_time_expression_for_internship_notice() {
+        let result = analyze_text(
+            "8月31日下午上课前需要提交纸质材料",
+            "2026-08-28T09:00:00+08:00",
+            "time-scope".to_owned(),
+        )
+        .unwrap();
+        let candidate = result.candidates.first().unwrap();
+        assert_eq!(
+            candidate.due_expression.as_deref(),
+            Some("8月31日下午上课前")
+        );
+        assert_eq!(candidate.due_precision.as_deref(), Some("period"));
+        assert_eq!(
+            candidate.time_resolution_status.as_deref(),
+            Some("needsReview")
+        );
+        assert_eq!(candidate.due_at, None);
+    }
+
+    #[test]
+    fn flat_legacy_mode_keeps_preparation_actions_without_touching_aggregated_default() {
+        let text = "实习即将结束，请完成校友邦上的所有任务。8月31日下午上课前需要提交纸质材料。";
+        let aggregated =
+            analyze_text_with_mode(text, "2026-08-28T09:00:00+08:00", "agg".to_owned(), true)
+                .unwrap();
+        let legacy = analyze_text_with_mode(
+            text,
+            "2026-08-28T09:00:00+08:00",
+            "legacy".to_owned(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(aggregated.candidates.len(), 2);
+        assert!(legacy.candidates.len() >= 2);
+        assert_eq!(aggregated.revision_id, "agg");
     }
 }

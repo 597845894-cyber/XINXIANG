@@ -581,6 +581,20 @@ button {
   gap: 10px;
 }
 
+.candidate-relation,
+.candidate-warning {
+  display: block;
+  margin-top: 0.35rem;
+}
+
+.candidate-relation {
+  color: var(--accent);
+}
+
+.candidate-warning {
+  color: var(--warning);
+}
+
 .analysis-result-heading span,
 .candidate-card span,
 .candidate-card em {
@@ -610,22 +624,42 @@ button {
 }
 
 .candidate-card {
-  padding: 10px 12px;
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: start;
+  gap: 7px 12px;
+  padding: 12px;
   background: var(--surface);
   border: 1px solid var(--line);
 }
 
 .candidate-card strong {
-  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .candidate-card em {
   font-style: normal;
 }
 
-.candidate-evidence {
-  flex-basis: 100%;
+.candidate-detail {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--text-muted);
   line-height: 1.5;
+}
+
+.candidate-evidence {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.aggregation-panel {
+  margin-top: 14px;
 }
 
 .analysis-warnings,
@@ -1076,6 +1110,14 @@ button {
 .task-filters button span:last-child {
   font-size: 11px;
 }
+.settings-sections select {
+  min-height: 36px;
+  padding: 0 9px;
+  border: 1px solid #ccd5d1;
+  border-radius: 5px;
+  background: #fff;
+  color: #33423c;
+}
 .task-list {
   border-top: 1px solid #dbe1de;
 }
@@ -1381,6 +1423,13 @@ button {
 }
 
 @media (max-width: 640px) {
+  .candidate-card {
+    grid-template-columns: 1fr;
+  }
+  .candidate-card > span,
+  .candidate-card > em {
+    justify-self: start;
+  }
   .review-field-grid {
     grid-template-columns: 1fr;
   }

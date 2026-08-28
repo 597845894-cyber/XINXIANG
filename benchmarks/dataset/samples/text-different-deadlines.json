@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 2,
+  "id": "text-different-deadlines",
+  "input": { "kind": "text", "noticePublishedAt": "2026-08-28T09:00:00+08:00", "timezone": "Asia/Shanghai", "text": "请于9月1日前提交课程报告至教务处，并于9月3日前将纸质回执交给班主任。" },
+  "coverage": ["text", "multiple-tasks"],
+  "expected": {
+    "category": "required-action", "changeIntent": "none", "taskCount": 2,
+    "tasks": [
+      { "title": "提交课程报告", "deadlineExpression": "9月1日前", "evidence": ["9月1日前提交课程报告至教务处"] },
+      { "title": "提交纸质回执", "deadlineExpression": "9月3日前", "evidence": ["9月3日前将纸质回执交给班主任"] }
+    ],
+    "uncertainties": []
+  }
+}
