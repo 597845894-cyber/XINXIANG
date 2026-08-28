@@ -28,6 +28,7 @@ import type {
   NoticeState,
   NoticeSummaryV1,
   TaskCandidatePayloadV1,
+  TaskRevisionViewV1,
   TaskViewV1,
   NotificationEventV1,
 } from "./contracts/v1";
@@ -1228,7 +1229,17 @@ function TasksView() {
   const [filter, setFilter] = useState("本周");
   const [tasks, setTasks] = useState<TaskViewV1[]>([]);
   const [message, setMessage] = useState("");
+  const [history, setHistory] = useState<TaskRevisionViewV1[] | null>(null);
+  const [historyTask, setHistoryTask] = useState<TaskViewV1 | null>(null);
+  const [sourceDetail, setSourceDetail] = useState<NoticeDetailV1 | null>(null);
+  const [sourceImageUrl, setSourceImageUrl] = useState<string | null>(null);
   const [now] = useState(() => Date.now());
+
+  useEffect(() => {
+    return () => {
+      if (sourceImageUrl) URL.revokeObjectURL(sourceImageUrl);
+    };
+  }, [sourceImageUrl]);
 
   async function refresh() {
     const next = await listTasks();
@@ -1346,12 +1357,42 @@ function TasksView() {
 
   async function showHistory(task: TaskViewV1) {
     try {
-      const history = await getTaskHistory(task.id);
+      const revisions = await getTaskHistory(task.id);
+      setHistory(revisions);
+      setHistoryTask(task);
+      setSourceDetail(null);
+      setSourceImageUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return null;
+      });
       setMessage(
-        history ? `该任务有 ${history.length} 个修订版本。` : "浏览器演示数据暂不连接历史记录。",
+        revisions ? `已加载 ${revisions.length} 个修订版本。` : "浏览器演示数据暂不连接历史记录。",
       );
     } catch {
       setMessage("无法读取任务历史。");
+    }
+  }
+
+  async function showSource(task: TaskViewV1) {
+    if (!task.noticeId || task.sourceRemovedAt) {
+      setMessage("该任务的原始通知已删除，无法再查看来源。历史修订仍保留在本机。");
+      return;
+    }
+    try {
+      const detail = await getNoticeDetail(task.noticeId);
+      setSourceDetail(detail);
+      const preview = detail?.sourceAsset ? await getNoticeImagePreview(task.noticeId) : null;
+      setSourceImageUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return preview
+          ? URL.createObjectURL(
+              new Blob([new Uint8Array(preview.bytes)], { type: preview.mediaType }),
+            )
+          : null;
+      });
+      setMessage(detail ? "已加载原始通知依据。" : "原始通知已不可访问。");
+    } catch {
+      setMessage("无法读取原始通知依据。");
     }
   }
 
@@ -1441,6 +1482,66 @@ function TasksView() {
           ))}
         </aside>
         <div className="task-list">
+          {historyTask ? (
+            <section className="task-history-panel" aria-label="任务修订与来源">
+              <div className="page-intro inline-intro">
+                <div>
+                  <p className="section-eyebrow">{historyTask.payload.title}</p>
+                  <h3>修订与依据</h3>
+                </div>
+                <button
+                  className="icon-button"
+                  aria-label="关闭修订记录"
+                  onClick={() => {
+                    setHistoryTask(null);
+                    setHistory(null);
+                    setSourceDetail(null);
+                    setSourceImageUrl((current) => {
+                      if (current) URL.revokeObjectURL(current);
+                      return null;
+                    });
+                  }}
+                  type="button"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              {history?.map((revision) => (
+                <div className="task-history-row" key={revision.id}>
+                  <strong>版本 {revision.revisionNumber}</strong>
+                  <span>{new Date(revision.createdAt).toLocaleString()}</span>
+                  <span>
+                    {revision.analysisRevisionId
+                      ? `分析版本 ${revision.analysisRevisionId.slice(0, 8)}`
+                      : "用户手工修订"}
+                  </span>
+                  <p>{revision.payload.title}</p>
+                  {revision.payload.evidence?.length ? (
+                    <small>依据：{revision.payload.evidence.join("；")}</small>
+                  ) : (
+                    <small>无自动依据</small>
+                  )}
+                </div>
+              ))}
+              <button
+                className="secondary-button"
+                onClick={() => void showSource(historyTask)}
+                type="button"
+              >
+                查看原始通知
+              </button>
+              {sourceDetail ? (
+                <div className="task-source-detail">
+                  <strong>原始通知</strong>
+                  {sourceDetail.originalText ? <p>{sourceDetail.originalText}</p> : null}
+                  {sourceImageUrl ? (
+                    <img alt="任务来源截图" className="task-source-image" src={sourceImageUrl} />
+                  ) : null}
+                  {!sourceDetail.originalText && !sourceImageUrl ? <p>该来源已无法读取。</p> : null}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
           {tasks
             .filter(visible)
             .sort((left, right) => {

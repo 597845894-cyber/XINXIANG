@@ -10,7 +10,7 @@ mod understanding;
 use contracts::{
     AnalysisProgressV1, AppBootstrapV1, BackupSummaryV1, CandidateViewV1, ImagePreviewV1,
     NoticeDetailV1, NoticeRelationViewV1, NoticeStateV1, NoticeSummaryV1, NotificationEventV1,
-    ReminderViewV1, SecurityStatusV1, TaskViewV1,
+    ReminderViewV1, SecurityStatusV1, TaskRevisionViewV1, TaskViewV1,
 };
 use model_resources::{
     inspect_resources, install_resources, install_root, selected_manifest, ModelResourceStatusV1,
@@ -466,7 +466,7 @@ fn set_task_state(
 }
 
 #[tauri::command(rename_all = "camelCase")]
-fn get_task_history(app: AppHandle, task_id: String) -> Result<Vec<serde_json::Value>, String> {
+fn get_task_history(app: AppHandle, task_id: String) -> Result<Vec<TaskRevisionViewV1>, String> {
     capture::task_history(&capture_data_directory(&app)?, &task_id)
         .map_err(|error| error.to_string())
 }

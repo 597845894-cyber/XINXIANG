@@ -156,6 +156,15 @@ export interface TaskViewV1 {
   sourceRemovedAt: string | null;
 }
 
+export interface TaskRevisionViewV1 {
+  id: string;
+  revisionNumber: number;
+  sourceCandidateId: string | null;
+  analysisRevisionId: string | null;
+  payload: TaskCandidatePayloadV1;
+  createdAt: string;
+}
+
 export interface BackupSummaryV1 {
   formatVersion: number;
   createdAt: string;

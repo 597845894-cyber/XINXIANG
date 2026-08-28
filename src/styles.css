@@ -1027,6 +1027,60 @@ button {
 .task-list {
   border-top: 1px solid #dbe1de;
 }
+.task-history-panel {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+  padding: 16px;
+  border: 1px solid #dfe4e1;
+  border-radius: 6px;
+  background: #f9fbfa;
+}
+.task-history-panel h3 {
+  margin: 4px 0 0;
+  font-size: 16px;
+}
+.task-history-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 6px 12px;
+  padding: 10px 0;
+  border-top: 1px solid #e1e7e3;
+  color: #5c6963;
+  font-size: 12px;
+}
+.task-history-row strong,
+.task-history-row p,
+.task-history-row small {
+  grid-column: 1 / -1;
+}
+.task-history-row p {
+  margin: 0;
+  color: #25352e;
+  font-size: 13px;
+}
+.task-history-row small,
+.task-source-detail p {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.task-source-detail {
+  padding: 12px;
+  border-left: 3px solid #317d62;
+  background: #fff;
+}
+.task-source-detail p {
+  margin: 8px 0 0;
+  color: #4f5c56;
+}
+.task-source-image {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  margin-top: 10px;
+  border: 1px solid #dbe1de;
+  object-fit: contain;
+}
 .task-row {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) auto;

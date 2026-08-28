@@ -13,6 +13,7 @@ import type {
   TaskViewV1,
   NoticeRelationViewV1,
   TaskCandidatePayloadV1,
+  TaskRevisionViewV1,
   ReminderViewV1,
 } from "../contracts/v1";
 
@@ -199,9 +200,9 @@ export async function runReminderScan(): Promise<number> {
   return invoke<number>("run_reminder_scan");
 }
 
-export async function getTaskHistory(taskId: string): Promise<TaskCandidatePayloadV1[] | null> {
+export async function getTaskHistory(taskId: string): Promise<TaskRevisionViewV1[] | null> {
   if (!isDesktopRuntime()) return null;
-  return invoke<TaskCandidatePayloadV1[]>("get_task_history", { taskId });
+  return invoke<TaskRevisionViewV1[]>("get_task_history", { taskId });
 }
 
 export async function suggestNoticeRelations(

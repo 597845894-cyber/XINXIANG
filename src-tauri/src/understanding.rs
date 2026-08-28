@@ -335,19 +335,49 @@ fn extract_rules(text: &str, published_at: &str) -> Result<RuleExtraction, Under
     ));
 
     let expressions = find_date_expressions(text);
+    let time = find_time(text);
+    fields.push(field(
+        "time",
+        time.clone(),
+        time.iter().cloned().collect(),
+        if time.is_some() { 0.9 } else { 0.45 },
+    ));
+    let distinct_dates = expressions
+        .iter()
+        .filter_map(|(_, expression)| absolute_date(expression))
+        .collect::<BTreeSet<_>>();
     let mut candidates = Vec::new();
     for (index, line) in action_lines(text).into_iter().enumerate() {
-        let expression = relative_expression(line);
+        let expression = relative_expression(line).or_else(|| {
+            find_date_expressions(line)
+                .into_iter()
+                .next()
+                .map(|(_, value)| value)
+        });
         let parsed = expression
             .as_deref()
-            .and_then(|value| resolve_relative(value, published_at).ok());
-        let status = if parsed.is_some() || expression.is_none() {
+            .and_then(|value| {
+                resolve_relative(value, published_at)
+                    .ok()
+                    .or_else(|| resolve_absolute(value, published_at).ok())
+            })
+            .map(|value| apply_time(value, find_time(line).or_else(|| time.clone()).as_deref()));
+        let has_conflict = distinct_dates.len() > 1 && expression.is_some();
+        let status = if has_conflict {
+            "conflict"
+        } else if parsed.is_some() || expression.is_none() {
             "trusted"
         } else {
             "needsReview"
         };
         if parsed.is_none() && !expressions.is_empty() {
             warnings.push(format!("第 {} 项任务的时间表达需要核对", index + 1));
+        }
+        if has_conflict {
+            warnings.push(format!(
+                "第 {} 项任务存在多个冲突时间表达，请人工选择",
+                index + 1
+            ));
         }
         candidates.push(TaskCandidatePayloadV1 {
             title: action_title(line),
@@ -359,12 +389,12 @@ fn extract_rules(text: &str, published_at: &str) -> Result<RuleExtraction, Under
             materials: materials.clone(),
             audience: audience.clone(),
             required,
-            confidence: if status == "trusted" { 0.84 } else { 0.56 },
+            confidence: if status == "trusted" { 0.84 } else { 0.42 },
             evidence: vec![line.to_owned()],
             status: status.to_owned(),
         });
     }
-    if expressions.len() > 1 {
+    if distinct_dates.len() > 1 {
         warnings.push("检测到多个时间表达，请确认各任务对应的截止时间".to_owned());
     }
     Ok(RuleExtraction {
@@ -469,6 +499,41 @@ fn find_phone(text: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+fn find_time(text: &str) -> Option<String> {
+    for token in text.split(|character: char| !character.is_ascii_digit() && character != ':') {
+        let Some((hour, minute)) = token.split_once(':') else {
+            continue;
+        };
+        let (Ok(hour), Ok(minute)) = (hour.parse::<u32>(), minute.parse::<u32>()) else {
+            continue;
+        };
+        if hour < 24 && minute < 60 {
+            return Some(format!("{hour:02}:{minute:02}"));
+        }
+    }
+    for value in text.split('点').take(text.matches('点').count()) {
+        let digits = value
+            .chars()
+            .rev()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>();
+        let Ok(hour) = digits.chars().rev().collect::<String>().parse::<u32>() else {
+            continue;
+        };
+        if hour < 24 {
+            return Some(format!("{hour:02}:00"));
+        }
+    }
+    None
+}
+
+fn apply_time(date_time: String, time: Option<&str>) -> String {
+    let Some(time) = time else {
+        return date_time;
+    };
+    format!("{}T{time}:00Z", &date_time[..10])
+}
+
 fn find_location(text: &str) -> Option<String> {
     text.lines()
         .map(str::trim)
@@ -539,20 +604,72 @@ fn find_required(text: &str) -> Option<bool> {
 fn find_date_expressions(text: &str) -> Vec<(usize, String)> {
     text.lines()
         .enumerate()
-        .filter_map(|(index, line)| {
-            ["今天", "明天", "后天", "本周", "下周", "月底", "近期"]
+        .flat_map(|(index, line)| {
+            let relative = [
+                "今天",
+                "明天",
+                "后天",
+                "本周一",
+                "本周二",
+                "本周三",
+                "本周四",
+                "本周五",
+                "本周六",
+                "本周日",
+                "下周一",
+                "下周二",
+                "下周三",
+                "下周四",
+                "下周五",
+                "下周六",
+                "下周日",
+                "本周",
+                "下周",
+                "月底",
+                "近期",
+            ];
+            let mut values = relative
                 .iter()
-                .find(|word| line.contains(**word))
+                .filter(|word| line.contains(**word))
                 .map(|word| (index, (*word).to_owned()))
+                .collect::<Vec<_>>();
+            values.extend(
+                find_absolute_dates(line)
+                    .into_iter()
+                    .map(|value| (index, value)),
+            );
+            values
         })
         .collect()
 }
 
 fn relative_expression(line: &str) -> Option<String> {
-    ["今天", "明天", "后天", "本周", "下周", "月底", "近期"]
-        .iter()
-        .find(|word| line.contains(**word))
-        .map(|word| (*word).to_owned())
+    [
+        "今天",
+        "明天",
+        "后天",
+        "本周一",
+        "本周二",
+        "本周三",
+        "本周四",
+        "本周五",
+        "本周六",
+        "本周日",
+        "下周一",
+        "下周二",
+        "下周三",
+        "下周四",
+        "下周五",
+        "下周六",
+        "下周日",
+        "本周",
+        "下周",
+        "月底",
+        "近期",
+    ]
+    .iter()
+    .find(|word| line.contains(**word))
+    .map(|word| (*word).to_owned())
 }
 
 fn resolve_relative(expression: &str, published_at: &str) -> Result<String, UnderstandingError> {
@@ -561,11 +678,116 @@ fn resolve_relative(expression: &str, published_at: &str) -> Result<String, Unde
         "今天" => 0,
         "明天" => 1,
         "后天" => 2,
-        "本周" => 5,
-        "下周" => 12,
+        "本周一" => weekday_offset(date, 1, false),
+        "本周二" => weekday_offset(date, 2, false),
+        "本周三" => weekday_offset(date, 3, false),
+        "本周四" => weekday_offset(date, 4, false),
+        "本周五" => weekday_offset(date, 5, false),
+        "本周六" => weekday_offset(date, 6, false),
+        "本周日" => weekday_offset(date, 7, false),
+        "下周一" => weekday_offset(date, 1, true),
+        "下周二" => weekday_offset(date, 2, true),
+        "下周三" => weekday_offset(date, 3, true),
+        "下周四" => weekday_offset(date, 4, true),
+        "下周五" => weekday_offset(date, 5, true),
+        "下周六" => weekday_offset(date, 6, true),
+        "下周日" => weekday_offset(date, 7, true),
+        "本周" | "下周" | "月底" | "近期" => return Err(UnderstandingError::DateInvalid),
         _ => return Err(UnderstandingError::DateInvalid),
     };
     let (year, month, day) = add_days(date, days);
+    Ok(format!("{year:04}-{month:02}-{day:02}T23:59:00Z"))
+}
+
+fn weekday_offset(date: (i32, u32, u32), weekday: i32, next_week: bool) -> i32 {
+    let current = weekday_of(date);
+    let week_start_offset = 1 - current;
+    week_start_offset + weekday - 1 + if next_week { 7 } else { 0 }
+}
+
+fn weekday_of((year, month, day): (i32, u32, u32)) -> i32 {
+    let (mut y, mut m) = (year, month as i32);
+    if m < 3 {
+        y -= 1;
+        m += 12;
+    }
+    let k = y % 100;
+    let j = y / 100;
+    let h = (day as i32 + (13 * (m + 1)) / 5 + k + k / 4 + j / 4 + 5 * j) % 7;
+    match h {
+        0 => 6,
+        1 => 7,
+        2 => 1,
+        3 => 2,
+        4 => 3,
+        5 => 4,
+        _ => 5,
+    }
+}
+
+fn find_absolute_dates(line: &str) -> Vec<String> {
+    let chars = line.chars().collect::<Vec<_>>();
+    let mut values = Vec::new();
+    let mut start = 0;
+    while start < chars.len() {
+        if !chars[start].is_ascii_digit() {
+            start += 1;
+            continue;
+        }
+        let mut end = start;
+        while end < chars.len()
+            && (chars[end].is_ascii_digit() || matches!(chars[end], '-' | '/' | '年' | '月' | '日'))
+        {
+            end += 1;
+        }
+        let candidate = chars[start..end].iter().collect::<String>();
+        if let Some((year, month, day)) = parse_date_expression(&candidate) {
+            values.push(format!("{year:04}-{month:02}-{day:02}"));
+        }
+        start = end;
+    }
+    values
+}
+
+fn parse_date_expression(value: &str) -> Option<(i32, u32, u32)> {
+    let normalized = value
+        .replace('年', "-")
+        .replace('月', "-")
+        .replace('日', "");
+    let parts = normalized
+        .split(['-', '/'])
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let (year, month, day) = match parts.as_slice() {
+        [year, month, day] if year.len() == 4 => {
+            (year.parse().ok()?, month.parse().ok()?, day.parse().ok()?)
+        }
+        [month, day] => (0, month.parse().ok()?, day.parse().ok()?),
+        _ => return None,
+    };
+    if !(1..=12).contains(&month)
+        || day == 0
+        || day > days_in_month(year.max(2024), month as i32) as u32
+    {
+        return None;
+    }
+    Some((year, month, day))
+}
+
+fn absolute_date(expression: &str) -> Option<String> {
+    let (year, month, day) = parse_date_expression(expression)?;
+    (year > 0).then(|| format!("{year:04}-{month:02}-{day:02}"))
+}
+
+fn resolve_absolute(expression: &str, published_at: &str) -> Result<String, UnderstandingError> {
+    let (mut year, month, day) =
+        parse_date_expression(expression).ok_or(UnderstandingError::DateInvalid)?;
+    if year == 0 {
+        year = parse_iso_date(published_at)?.0;
+    }
+    if day > days_in_month(year, month as i32) as u32 {
+        return Err(UnderstandingError::DateInvalid);
+    }
     Ok(format!("{year:04}-{month:02}-{day:02}T23:59:00Z"))
 }
 
@@ -583,7 +805,7 @@ fn parse_iso_date(value: &str) -> Result<(i32, u32, u32), UnderstandingError> {
     let day = value[8..10]
         .parse()
         .map_err(|_| UnderstandingError::DateInvalid)?;
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+    if !(1..=12).contains(&month) || day == 0 || day > days_in_month(year, month as i32) as u32 {
         return Err(UnderstandingError::DateInvalid);
     }
     Ok((year, month, day))
@@ -628,7 +850,8 @@ fn days_in_month(year: i32, month: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        analyze_text, normalize_text, parse_model_output, recognize_image, UnderstandingError,
+        analyze_text, normalize_text, parse_model_output, recognize_image, resolve_absolute,
+        resolve_relative, UnderstandingError,
     };
 
     #[test]
@@ -686,5 +909,67 @@ mod tests {
             Err(UnderstandingError::ModelTimeout)
         ));
         assert!(parse_model_output(r#"{"category":"mustComplete"}"#).is_ok());
+    }
+
+    #[test]
+    fn resolves_absolute_dates_and_rejects_invalid_calendar_days() {
+        assert_eq!(
+            resolve_absolute("2026年8月28日", "2026-08-01T09:00:00Z").unwrap(),
+            "2026-08-28T23:59:00Z"
+        );
+        assert_eq!(
+            resolve_absolute("8/28", "2026-08-01T09:00:00Z").unwrap(),
+            "2026-08-28T23:59:00Z"
+        );
+        assert!(resolve_absolute("2026-02-30", "2026-08-01T09:00:00Z").is_err());
+    }
+
+    #[test]
+    fn resolves_this_and_next_week_without_silently_rolling_this_week_forward() {
+        let published_at = "2026-08-28T09:00:00Z";
+        assert_eq!(
+            resolve_relative("本周一", published_at).unwrap(),
+            "2026-08-24T23:59:00Z"
+        );
+        assert_eq!(
+            resolve_relative("下周一", published_at).unwrap(),
+            "2026-08-31T23:59:00Z"
+        );
+        assert!(resolve_relative("下周", published_at).is_err());
+    }
+
+    #[test]
+    fn marks_multiple_absolute_due_dates_as_a_conflict() {
+        let result = analyze_text(
+            "请提交报名表，截止2026-08-28；如有补充材料，截止2026-08-30。",
+            "2026-08-01T09:00:00Z",
+            "revision-conflict".to_owned(),
+        )
+        .unwrap();
+        assert_eq!(result.candidates.len(), 1);
+        assert_eq!(result.candidates[0].status, "conflict");
+        assert!(result.requires_review);
+    }
+
+    #[test]
+    fn extracts_clock_time_with_a_date_expression() {
+        let result = analyze_text(
+            "请于8月28日 17:30前提交报名表。",
+            "2026-08-01T09:00:00Z",
+            "revision-time".to_owned(),
+        )
+        .unwrap();
+        assert_eq!(
+            result.candidates[0].due_at.as_deref(),
+            Some("2026-08-28T17:30:00Z")
+        );
+        assert_eq!(
+            result
+                .fields
+                .iter()
+                .find(|field| field.name == "time")
+                .and_then(|field| field.value.as_deref()),
+            Some("17:30")
+        );
     }
 }

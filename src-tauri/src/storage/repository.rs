@@ -176,6 +176,16 @@ pub struct TaskRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskRevisionRecord {
+    pub id: String,
+    pub revision_number: u32,
+    pub source_candidate_id: Option<String>,
+    pub analysis_revision_id: Option<String>,
+    pub payload: Vec<u8>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReminderRecord {
     pub id: String,
     pub task_id: String,
@@ -777,15 +787,29 @@ impl<'connection> NoticeRepository<'connection> {
         transaction.commit().map_err(|_| RepositoryError::Database)
     }
 
-    pub fn task_history(&self, task_id: &str) -> Result<Vec<Vec<u8>>, RepositoryError> {
+    pub fn task_history(&self, task_id: &str) -> Result<Vec<TaskRevisionRecord>, RepositoryError> {
         let mut statement = self
             .connection
             .prepare(
-                "SELECT payload FROM task_revisions WHERE task_id = ?1 ORDER BY revision_number",
+                "SELECT revision.id, revision.revision_number, revision.source_candidate_id,
+                        candidate.analysis_revision_id, revision.payload, revision.created_at
+                 FROM task_revisions revision
+                 LEFT JOIN task_candidates candidate ON candidate.id = revision.source_candidate_id
+                 WHERE revision.task_id = ?1
+                 ORDER BY revision.revision_number",
             )
             .map_err(|_| RepositoryError::Database)?;
         let rows = statement
-            .query_map([task_id], |row| row.get(0))
+            .query_map([task_id], |row| {
+                Ok(TaskRevisionRecord {
+                    id: row.get(0)?,
+                    revision_number: row.get(1)?,
+                    source_candidate_id: row.get(2)?,
+                    analysis_revision_id: row.get(3)?,
+                    payload: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            })
             .map_err(|_| RepositoryError::Database)?;
         rows.map(|row| row.map_err(|_| RepositoryError::Database))
             .collect()

@@ -7,7 +7,8 @@ use crate::{
     backup::{self, BackupSummary},
     contracts::{
         BackupSummaryV1, CandidateViewV1, ImagePreviewV1, NoticeDetailV1, NoticeRelationViewV1,
-        NoticeStateV1, NoticeSummaryV1, ReminderViewV1, SourceAssetInfoV1, TaskViewV1,
+        NoticeStateV1, NoticeSummaryV1, ReminderViewV1, SourceAssetInfoV1, TaskRevisionViewV1,
+        TaskViewV1,
     },
     security::key_protection::{DpapiCurrentUserProtector, MasterKeyManager},
     storage::{
@@ -533,13 +534,23 @@ pub fn claim_due_reminders(app_data_directory: &Path) -> Result<Vec<ReminderReco
 pub fn task_history(
     app_data_directory: &Path,
     task_id: &str,
-) -> Result<Vec<serde_json::Value>, CaptureError> {
+) -> Result<Vec<TaskRevisionViewV1>, CaptureError> {
     let database = open_database(app_data_directory)?;
     NoticeRepository::new(database.connection())
         .task_history(task_id)
         .map_err(map_repository_error)?
         .into_iter()
-        .map(|payload| serde_json::from_slice(&payload).map_err(|_| CaptureError::Storage))
+        .map(|revision| {
+            Ok(TaskRevisionViewV1 {
+                id: revision.id,
+                revision_number: revision.revision_number,
+                source_candidate_id: revision.source_candidate_id,
+                analysis_revision_id: revision.analysis_revision_id,
+                payload: serde_json::from_slice(&revision.payload)
+                    .map_err(|_| CaptureError::Storage)?,
+                created_at: revision.created_at,
+            })
+        })
         .collect()
 }
 

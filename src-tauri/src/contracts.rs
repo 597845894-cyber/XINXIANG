@@ -176,6 +176,17 @@ pub struct TaskViewV1 {
     pub source_removed_at: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRevisionViewV1 {
+    pub id: String,
+    pub revision_number: u32,
+    pub source_candidate_id: Option<String>,
+    pub analysis_revision_id: Option<String>,
+    pub payload: serde_json::Value,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupSummaryV1 {
