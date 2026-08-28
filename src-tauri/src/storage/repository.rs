@@ -1551,9 +1551,9 @@ mod tests {
                 "qwen-v1",
                 Some("报名、提交材料、参加活动"),
                 &[
-                    NewCandidate { id: "candidate-signup", payload: br#"{"title":"报名"}"# },
-                    NewCandidate { id: "candidate-materials", payload: br#"{"title":"提交材料"}"# },
-                    NewCandidate { id: "candidate-event", payload: br#"{"title":"参加活动"}"# },
+                    NewCandidate { id: "candidate-signup", payload: br#"{"title":"\u62a5\u540d"}"# },
+                    NewCandidate { id: "candidate-materials", payload: br#"{"title":"\u63d0\u4ea4\u6750\u6599"}"# },
+                    NewCandidate { id: "candidate-event", payload: br#"{"title":"\u53c2\u52a0\u6d3b\u52a8"}"# },
                 ],
             )
             .unwrap();
