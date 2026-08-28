@@ -164,6 +164,15 @@ pub struct CandidateRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalysisRevisionRecord {
+    pub id: String,
+    pub revision_number: u32,
+    pub classifier_version: String,
+    pub ocr_text: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskRecord {
     pub id: String,
     pub notice_id: Option<String>,
@@ -314,6 +323,32 @@ impl<'connection> NoticeRepository<'connection> {
             )
             .map_err(|_| RepositoryError::Database)?;
         transaction.commit().map_err(|_| RepositoryError::Database)
+    }
+
+    pub fn list_analysis_revisions(
+        &self,
+        notice_id: &str,
+    ) -> Result<Vec<AnalysisRevisionRecord>, RepositoryError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT id, revision_number, classifier_version, CAST(ocr_text AS TEXT), created_at
+                 FROM analysis_revisions WHERE notice_id = ?1 ORDER BY revision_number DESC",
+            )
+            .map_err(|_| RepositoryError::Database)?;
+        let rows = statement
+            .query_map([notice_id], |row| {
+                Ok(AnalysisRevisionRecord {
+                    id: row.get(0)?,
+                    revision_number: row.get(1)?,
+                    classifier_version: row.get(2)?,
+                    ocr_text: row.get(3)?,
+                    created_at: row.get(4)?,
+                })
+            })
+            .map_err(|_| RepositoryError::Database)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|_| RepositoryError::Database)
     }
 
     pub fn mark_analysis_failed(&self, notice_id: &str) -> Result<(), RepositoryError> {

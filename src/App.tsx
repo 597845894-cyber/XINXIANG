@@ -21,6 +21,7 @@ import { useEffect, useRef, useState, type ComponentType } from "react";
 
 import type {
   AnalysisResultV1,
+  AnalysisRevisionViewV1,
   AppRouteId,
   CandidateViewV1,
   NoticeDetailV1,
@@ -49,6 +50,7 @@ import {
   listReviewCandidates,
   listTasks,
   listNotices,
+  listAnalysisRevisions,
   mergeTaskCandidates,
   quitDesktopApp,
   setTaskState,
@@ -184,6 +186,10 @@ function InboxView({ openImport }: { openImport: () => void }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResultV1 | null>(null);
   const [analysisState, setAnalysisState] = useState<"idle" | "running" | "failed">("idle");
+  const [ocrEditorOpen, setOcrEditorOpen] = useState(false);
+  const [manualOcrText, setManualOcrText] = useState("");
+  const [revisions, setRevisions] = useState<AnalysisRevisionViewV1[]>([]);
+  const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [deleteMode, setDeleteMode] = useState<"cascade" | "keepTasks" | null>(null);
   const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
 
@@ -218,6 +224,9 @@ function InboxView({ openImport }: { openImport: () => void }) {
     void getNoticeDetail(selectedId)
       .then((next) => setDetail(next))
       .catch(() => setError("无法读取该通知的原始依据。"));
+    void listAnalysisRevisions(selectedId)
+      .then((next) => setRevisions(next ?? []))
+      .catch(() => setRevisions([]));
   }, [selectedId]);
 
   useEffect(() => {
@@ -305,13 +314,15 @@ function InboxView({ openImport }: { openImport: () => void }) {
     }
   }
 
-  async function runAnalysis() {
+  async function runAnalysis(manualText?: string) {
     if (!detail) return;
     setAnalysisState("running");
     setError("");
     try {
-      const result = await analyzeNotice(detail.id);
+      const result = await analyzeNotice(detail.id, manualText);
       setAnalysis(result);
+      const nextRevisions = await listAnalysisRevisions(detail.id);
+      setRevisions(nextRevisions ?? []);
       await refresh();
       if (result) {
         setDetail((current) =>
@@ -340,6 +351,27 @@ function InboxView({ openImport }: { openImport: () => void }) {
       setError("取消分析请求未能发送。");
     }
   }
+
+  function openOcrEditor() {
+    setManualOcrText(
+      (current) => current || analysis?.normalizedText || revisions[0]?.ocrText || "",
+    );
+    setOcrEditorOpen(true);
+  }
+
+  function selectNotice(noticeId: string) {
+    setAnalysis(null);
+    setAnalysisState("idle");
+    setOcrEditorOpen(false);
+    setManualOcrText("");
+    setRevisionsOpen(false);
+    setSelectedId(noticeId);
+  }
+
+  const currentRevision = revisions[0];
+  const previousRevision = revisions[1];
+  const candidateTitles = (revision: AnalysisRevisionViewV1 | undefined) =>
+    revision?.candidates.map((candidate) => candidate.title).join("、") || "未生成任务候选";
 
   return (
     <div className="inbox-view">
@@ -376,7 +408,7 @@ function InboxView({ openImport }: { openImport: () => void }) {
             <button
               className={`notice-row ${selectedId === notice.id ? "is-selected" : ""}`}
               key={notice.id}
-              onClick={() => setSelectedId(notice.id)}
+              onClick={() => selectNotice(notice.id)}
               type="button"
             >
               <span className={`status-marker ${noticeTone(notice.inboxState)}`} />
@@ -449,6 +481,83 @@ function InboxView({ openImport }: { openImport: () => void }) {
                 </button>
               ) : null}
             </div>
+            {detail.sourceKind === "image" ? (
+              <section className="ocr-correction" aria-label="OCR 文字修正">
+                <div>
+                  <strong>识别文字修正</strong>
+                  <p>原始截图保持不变。修正后的文字会作为新的分析版本保存。</p>
+                </div>
+                <button className="secondary-button" onClick={openOcrEditor} type="button">
+                  修正识别文字
+                </button>
+                {ocrEditorOpen ? (
+                  <div className="ocr-editor">
+                    <label>
+                      手工输入或修正后的文字
+                      <textarea
+                        aria-label="手工输入或修正后的文字"
+                        onChange={(event) => setManualOcrText(event.target.value)}
+                        placeholder="OCR 失败时可在这里录入截图中的通知文字"
+                        value={manualOcrText}
+                      />
+                    </label>
+                    <div className="ocr-editor-actions">
+                      <button
+                        className="secondary-button"
+                        disabled={!manualOcrText.trim() || analysisState === "running"}
+                        onClick={() => void runAnalysis(manualOcrText.trim())}
+                        type="button"
+                      >
+                        使用修正文字重新分析
+                      </button>
+                      <button
+                        className="icon-button"
+                        aria-label="关闭文字修正"
+                        onClick={() => setOcrEditorOpen(false)}
+                        title="关闭"
+                        type="button"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+            {revisions.length ? (
+              <section className="analysis-revisions" aria-label="分析版本差异">
+                <div>
+                  <strong>分析版本</strong>
+                  <p>重新分析只会新增版本，不会覆盖已确认的任务。</p>
+                </div>
+                <button
+                  className="secondary-button"
+                  onClick={() => setRevisionsOpen((open) => !open)}
+                  type="button"
+                >
+                  {revisionsOpen ? "收起版本记录" : `查看版本差异（${revisions.length}）`}
+                </button>
+                {revisionsOpen ? (
+                  <div className="revision-list">
+                    {currentRevision && previousRevision ? (
+                      <p className="revision-diff">
+                        与上一版对比：任务候选由“{candidateTitles(previousRevision)}”变为“
+                        {candidateTitles(currentRevision)}”。
+                      </p>
+                    ) : null}
+                    {revisions.map((revision, index) => (
+                      <article className="revision-row" key={revision.id}>
+                        <strong>版本 {revision.revisionNumber}</strong>
+                        <span>{new Date(revision.createdAt).toLocaleString()}</span>
+                        <span>{index === 0 ? "当前分析结果" : revision.classifierVersion}</span>
+                        <p>任务候选：{candidateTitles(revision)}</p>
+                        {revision.ocrText ? <pre>{revision.ocrText}</pre> : null}
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
             {analysis ? (
               <div className="analysis-result" aria-label="本地分析结果">
                 <div className="analysis-result-heading">

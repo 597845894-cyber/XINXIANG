@@ -16,6 +16,7 @@ export type CommandName =
   | "setNoticeState"
   | "analyzeNotice"
   | "cancelAnalysis"
+  | "listAnalysisRevisions"
   | "listReviewCandidates"
   | "editTaskCandidate"
   | "confirmTaskCandidate"
@@ -135,6 +136,15 @@ export interface AnalysisProgressV1 {
   noticeId: string;
   stage: string;
   progressPercent: number;
+}
+
+export interface AnalysisRevisionViewV1 {
+  id: string;
+  revisionNumber: number;
+  classifierVersion: string;
+  ocrText: string | null;
+  candidates: TaskCandidatePayloadV1[];
+  createdAt: string;
 }
 
 export interface CandidateViewV1 {

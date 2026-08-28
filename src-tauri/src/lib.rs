@@ -8,9 +8,9 @@ pub mod storage;
 mod understanding;
 
 use contracts::{
-    AnalysisProgressV1, AppBootstrapV1, BackupSummaryV1, CandidateViewV1, ImagePreviewV1,
-    NoticeDetailV1, NoticeRelationViewV1, NoticeStateV1, NoticeSummaryV1, NotificationEventV1,
-    ReminderViewV1, SecurityStatusV1, TaskRevisionViewV1, TaskViewV1,
+    AnalysisProgressV1, AnalysisRevisionViewV1, AppBootstrapV1, BackupSummaryV1, CandidateViewV1,
+    ImagePreviewV1, NoticeDetailV1, NoticeRelationViewV1, NoticeStateV1, NoticeSummaryV1,
+    NotificationEventV1, ReminderViewV1, SecurityStatusV1, TaskRevisionViewV1, TaskViewV1,
 };
 use model_resources::{
     inspect_resources, install_resources, install_root, selected_manifest, ModelResourceStatusV1,
@@ -287,6 +287,7 @@ fn set_notice_state(app: AppHandle, notice_id: String, state: NoticeStateV1) -> 
 fn analyze_notice(
     app: AppHandle,
     notice_id: String,
+    manual_text: Option<String>,
 ) -> Result<understanding::AnalysisResultV1, String> {
     let _queue_guard = analysis_queue()
         .lock()
@@ -315,17 +316,46 @@ fn analyze_notice(
         return Err("ANALYSIS_CANCELLED".to_owned());
     }
     let revision_id = format!("analysis-{}", uuid::Uuid::new_v4());
-    let result = match input {
-        capture::AnalysisInput::Text(text) => {
-            emit_progress("规则提取与分类", 65);
+    let is_manual_input = manual_text
+        .as_ref()
+        .is_some_and(|text| !text.trim().is_empty());
+    let result = match manual_text.clone().filter(|text| !text.trim().is_empty()) {
+        Some(text) => {
+            emit_progress("使用人工修正文字", 55);
             understanding::analyze_text(&text, &published_at, revision_id.clone())
         }
-        capture::AnalysisInput::Image { bytes, media_type } => {
-            emit_progress("图像预处理与分块识别", 55);
-            understanding::analyze_image(&bytes, &media_type, &published_at, revision_id.clone())
+        None => match input {
+            capture::AnalysisInput::Text(text) => {
+                emit_progress("规则提取与分类", 65);
+                understanding::analyze_text(&text, &published_at, revision_id.clone())
+            }
+            capture::AnalysisInput::Image { bytes, media_type } => {
+                emit_progress("图像预处理与分块识别", 55);
+                understanding::analyze_image(
+                    &bytes,
+                    &media_type,
+                    &published_at,
+                    revision_id.clone(),
+                )
+            }
+        },
+    };
+    let mut result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            if error != understanding::UnderstandingError::ModelCancelled {
+                let _ = capture::set_notice_state(
+                    &capture_data_directory(&app)?,
+                    &notice_id,
+                    NoticeStateV1::Failed,
+                );
+            }
+            return Err(error.to_string());
         }
+    };
+    if is_manual_input {
+        result.classifier_version = "manual-ocr-input+rules-semantic-fallback-v1".to_owned();
     }
-    .map_err(|error| error.to_string())?;
     if is_analysis_cancelled(&notice_id) {
         return Err("ANALYSIS_CANCELLED".to_owned());
     }
@@ -346,13 +376,21 @@ fn analyze_notice(
         .zip(payloads.iter())
         .map(|(id, payload)| storage::repository::NewCandidate { id, payload })
         .collect::<Vec<_>>();
-    let ocr_text = result.ocr.as_ref().map(|ocr| {
-        ocr.lines
-            .iter()
-            .map(|line| line.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    });
+    let ocr_text = manual_text
+        .as_deref()
+        .filter(|text| !text.trim().is_empty())
+        .map_or_else(
+            || {
+                result.ocr.as_ref().map(|ocr| {
+                    ocr.lines
+                        .iter()
+                        .map(|line| line.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+            },
+            |text| Some(text.to_owned()),
+        );
     storage::repository::NoticeRepository::new(database.connection())
         .save_analysis_revision_full(
             &notice_id,
@@ -368,6 +406,15 @@ fn analyze_notice(
         pending.remove(&notice_id);
     }
     Ok(result)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn list_analysis_revisions(
+    app: AppHandle,
+    notice_id: String,
+) -> Result<Vec<AnalysisRevisionViewV1>, String> {
+    capture::list_analysis_revisions(&capture_data_directory(&app)?, &notice_id)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -584,6 +631,7 @@ pub fn run() {
             set_notice_state,
             analyze_notice,
             cancel_analysis,
+            list_analysis_revisions,
             list_review_candidates,
             edit_task_candidate,
             confirm_task_candidate,

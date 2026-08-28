@@ -28,6 +28,7 @@ pub enum CommandName {
     SetNoticeState,
     AnalyzeNotice,
     CancelAnalysis,
+    ListAnalysisRevisions,
     ListReviewCandidates,
     EditTaskCandidate,
     ConfirmTaskCandidate,
@@ -151,6 +152,17 @@ pub struct AnalysisProgressV1 {
     pub notice_id: String,
     pub stage: String,
     pub progress_percent: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisRevisionViewV1 {
+    pub id: String,
+    pub revision_number: u32,
+    pub classifier_version: String,
+    pub ocr_text: Option<String>,
+    pub candidates: Vec<serde_json::Value>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -284,6 +296,7 @@ impl AppBootstrapV1 {
                 CommandName::SetNoticeState,
                 CommandName::AnalyzeNotice,
                 CommandName::CancelAnalysis,
+                CommandName::ListAnalysisRevisions,
                 CommandName::ListReviewCandidates,
                 CommandName::EditTaskCandidate,
                 CommandName::ConfirmTaskCandidate,

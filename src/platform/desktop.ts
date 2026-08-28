@@ -3,6 +3,7 @@ import type {
   ImagePreviewV1,
   CandidateViewV1,
   AnalysisProgressV1,
+  AnalysisRevisionViewV1,
   AnalysisResultV1,
   BackupSummaryV1,
   ModelResourceStatusV1,
@@ -97,14 +98,24 @@ export async function setNoticeState(noticeId: string, state: NoticeState): Prom
   await invoke("set_notice_state", { noticeId, state });
 }
 
-export async function analyzeNotice(noticeId: string): Promise<AnalysisResultV1 | null> {
+export async function analyzeNotice(
+  noticeId: string,
+  manualText?: string,
+): Promise<AnalysisResultV1 | null> {
   if (!isDesktopRuntime()) return null;
-  return invoke<AnalysisResultV1>("analyze_notice", { noticeId });
+  return invoke<AnalysisResultV1>("analyze_notice", { noticeId, manualText: manualText ?? null });
 }
 
 export async function cancelAnalysis(noticeId: string): Promise<void> {
   if (!isDesktopRuntime()) return;
   await invoke("cancel_analysis", { noticeId });
+}
+
+export async function listAnalysisRevisions(
+  noticeId: string,
+): Promise<AnalysisRevisionViewV1[] | null> {
+  if (!isDesktopRuntime()) return null;
+  return invoke<AnalysisRevisionViewV1[]>("list_analysis_revisions", { noticeId });
 }
 
 export async function listReviewCandidates(): Promise<CandidateViewV1[] | null> {

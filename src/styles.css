@@ -509,6 +509,90 @@ button {
   background: var(--surface-muted);
 }
 
+.ocr-correction,
+.analysis-revisions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 16px;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.ocr-correction strong,
+.analysis-revisions strong {
+  font-size: 0.92rem;
+}
+
+.ocr-correction p,
+.analysis-revisions p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.ocr-editor,
+.revision-list {
+  grid-column: 1 / -1;
+}
+
+.ocr-editor textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 132px;
+  margin-top: 6px;
+  resize: vertical;
+}
+
+.ocr-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.revision-list {
+  display: grid;
+  gap: 8px;
+}
+
+.revision-diff {
+  padding: 10px 12px;
+  border-left: 3px solid #34866a;
+  background: var(--surface-muted);
+}
+
+.revision-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+}
+
+.revision-row span,
+.revision-row p {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.revision-row p,
+.revision-row pre {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.revision-row pre {
+  max-height: 120px;
+  overflow: auto;
+  padding: 8px;
+  white-space: pre-wrap;
+  background: var(--surface-muted);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
 .analysis-result-heading,
 .candidate-card {
   display: flex;

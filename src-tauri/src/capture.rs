@@ -7,9 +7,9 @@ use uuid::Uuid;
 use crate::{
     backup::{self, BackupSummary},
     contracts::{
-        BackupSummaryV1, CandidateViewV1, ImagePreviewV1, NoticeDetailV1, NoticeRelationViewV1,
-        NoticeStateV1, NoticeSummaryV1, ReminderViewV1, SourceAssetInfoV1, TaskRevisionViewV1,
-        TaskViewV1,
+        AnalysisRevisionViewV1, BackupSummaryV1, CandidateViewV1, ImagePreviewV1, NoticeDetailV1,
+        NoticeRelationViewV1, NoticeStateV1, NoticeSummaryV1, ReminderViewV1, SourceAssetInfoV1,
+        TaskRevisionViewV1, TaskViewV1,
     },
     security::key_protection::{DpapiCurrentUserProtector, MasterKeyManager},
     storage::{
@@ -167,6 +167,35 @@ pub fn notice_detail(
         .notice_detail(notice_id)
         .map(detail_to_contract)
         .map_err(map_repository_error)
+}
+
+pub fn list_analysis_revisions(
+    app_data_directory: &Path,
+    notice_id: &str,
+) -> Result<Vec<AnalysisRevisionViewV1>, CaptureError> {
+    let database = open_database(app_data_directory)?;
+    let repository = NoticeRepository::new(database.connection());
+    let revisions = repository
+        .list_analysis_revisions(notice_id)
+        .map_err(map_repository_error)?;
+    let candidates = repository
+        .list_candidates(None)
+        .map_err(map_repository_error)?;
+    Ok(revisions
+        .into_iter()
+        .map(|revision| AnalysisRevisionViewV1 {
+            candidates: candidates
+                .iter()
+                .filter(|candidate| candidate.analysis_revision_id == revision.id)
+                .filter_map(|candidate| serde_json::from_slice(&candidate.payload).ok())
+                .collect(),
+            id: revision.id,
+            revision_number: revision.revision_number,
+            classifier_version: revision.classifier_version,
+            ocr_text: revision.ocr_text,
+            created_at: revision.created_at,
+        })
+        .collect())
 }
 
 pub fn image_preview(
