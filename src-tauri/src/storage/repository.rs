@@ -530,9 +530,7 @@ impl<'connection> NoticeRepository<'connection> {
             .optional()
             .map_err(|_| RepositoryError::Database)?
             .ok_or(RepositoryError::MissingCandidate)?;
-        if target_state != CandidateState::Pending.as_db()
-            || source_ids.iter().any(|id| *id == target_id)
-        {
+        if target_state != CandidateState::Pending.as_db() || source_ids.contains(&target_id) {
             return Err(RepositoryError::InvalidState);
         }
         transaction.execute("UPDATE task_candidates SET structured_payload = ?2 WHERE id = ?1 AND candidate_state = 'pending'", params![target_id, payload]).map_err(|_| RepositoryError::Database)?;
@@ -606,7 +604,7 @@ impl<'connection> NoticeRepository<'connection> {
                     notice_id: row.get(1)?,
                     state: TaskState::from_db(&state_value).ok_or(rusqlite::Error::InvalidQuery)?,
                     current_revision_id: row.get(3)?,
-                    payload: row.get(4)?.unwrap_or_default(),
+                    payload: row.get::<_, Option<Vec<u8>>>(4)?.unwrap_or_default(),
                     created_at: row.get(5)?,
                     updated_at: row.get(6)?,
                     source_removed_at: row.get(7)?,
@@ -858,6 +856,180 @@ impl<'connection> NoticeRepository<'connection> {
             return Err(RepositoryError::MissingRelation);
         }
         Ok(())
+    }
+
+    pub fn relation_by_id(
+        &self,
+        relation_id: &str,
+    ) -> Result<NoticeRelationRecord, RepositoryError> {
+        self.connection
+            .query_row(
+                "SELECT id, notice_id, related_notice_id, relation_type, relation_state,
+                        COALESCE(evidence, X''), created_at
+                 FROM notice_relations WHERE id = ?1",
+                [relation_id],
+                |row| {
+                    Ok(NoticeRelationRecord {
+                        id: row.get(0)?,
+                        notice_id: row.get(1)?,
+                        related_notice_id: row.get(2)?,
+                        relation_type: row.get(3)?,
+                        relation_state: row.get(4)?,
+                        evidence: row.get(5)?,
+                        created_at: row.get(6)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|_| RepositoryError::Database)?
+            .ok_or(RepositoryError::MissingRelation)
+    }
+
+    pub fn accept_relation(
+        &self,
+        relation_id: &str,
+        proposed_payload: Option<&[u8]>,
+        existing_candidate_id: Option<&str>,
+    ) -> Result<(), RepositoryError> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|_| RepositoryError::Database)?;
+        let relation = transaction
+            .query_row(
+                "SELECT related_notice_id, relation_type, relation_state
+                 FROM notice_relations WHERE id = ?1",
+                [relation_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|_| RepositoryError::Database)?
+            .ok_or(RepositoryError::MissingRelation)?;
+        if relation.2 != "suggested" {
+            return Err(RepositoryError::InvalidState);
+        }
+        if relation.1 == "reschedule" && proposed_payload.is_none() {
+            return Err(RepositoryError::InvalidState);
+        }
+        let rescheduled_at = proposed_payload.and_then(|payload| {
+            serde_json::from_slice::<serde_json::Value>(payload)
+                .ok()?
+                .get("dueAt")?
+                .as_str()
+                .map(str::to_owned)
+        });
+        transaction
+            .execute(
+                "UPDATE notice_relations SET relation_state = 'accepted' WHERE id = ?1",
+                [relation_id],
+            )
+            .map_err(|_| RepositoryError::Database)?;
+
+        if matches!(relation.1.as_str(), "reschedule" | "cancel") {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT task.id, task.current_revision_id FROM tasks task
+                     JOIN task_revisions revision ON revision.id = task.current_revision_id
+                     WHERE task.notice_id = ?1 AND task.task_state = 'todo'
+                       AND revision.source_candidate_id = ?2",
+                )
+                .map_err(|_| RepositoryError::Database)?;
+            let task_ids = statement
+                .query_map(params![relation.0, existing_candidate_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(|_| RepositoryError::Database)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| RepositoryError::Database)?;
+            drop(statement);
+            for (index, (task_id, current_revision_id)) in task_ids.into_iter().enumerate() {
+                let existing_payload: Vec<u8>;
+                let payload = if relation.1 == "reschedule" {
+                    proposed_payload.expect("reschedule payload checked")
+                } else {
+                    existing_payload = transaction
+                        .query_row(
+                            "SELECT payload FROM task_revisions WHERE id = ?1",
+                            [current_revision_id],
+                            |row| row.get::<_, Vec<u8>>(0),
+                        )
+                        .map_err(|_| RepositoryError::Database)?;
+                    &existing_payload
+                };
+                let revision_number: i64 = transaction
+                    .query_row(
+                        "SELECT COALESCE(MAX(revision_number), 0) + 1 FROM task_revisions WHERE task_id = ?1",
+                        [task_id.as_str()],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| RepositoryError::Database)?;
+                let revision_id = format!("relation-{relation_id}-{index}");
+                transaction
+                    .execute(
+                        "INSERT INTO task_revisions (id, task_id, revision_number, payload, created_at)
+                         VALUES (?1, ?2, ?3, ?4, datetime('now'))",
+                        params![revision_id, task_id, revision_number, payload],
+                    )
+                    .map_err(|_| RepositoryError::Database)?;
+                let state = if relation.1 == "cancel" {
+                    TaskState::Cancelled.as_db()
+                } else {
+                    TaskState::Todo.as_db()
+                };
+                transaction
+                    .execute(
+                        "UPDATE tasks SET task_state = ?2, current_revision_id = ?3,
+                         updated_at = datetime('now') WHERE id = ?1",
+                        params![task_id, state, revision_id],
+                    )
+                    .map_err(|_| RepositoryError::Database)?;
+                if relation.1 == "cancel" {
+                    transaction
+                        .execute(
+                            "UPDATE reminders SET reminder_state = 'cancelled'
+                             WHERE task_id = ?1 AND reminder_state = 'pending'
+                             AND scheduled_at > datetime('now')",
+                            [task_id.as_str()],
+                        )
+                        .map_err(|_| RepositoryError::Database)?;
+                } else if relation.1 == "reschedule" {
+                    if let Some(scheduled_at) = rescheduled_at.as_deref() {
+                        transaction
+                            .execute(
+                                "UPDATE reminders SET scheduled_at = ?2
+                                 WHERE task_id = ?1 AND reminder_state = 'pending'
+                                 AND scheduled_at > datetime('now')",
+                                params![task_id, scheduled_at],
+                            )
+                            .map_err(|_| RepositoryError::Database)?;
+                    } else {
+                        transaction
+                            .execute(
+                                "UPDATE reminders SET reminder_state = 'cancelled'
+                                 WHERE task_id = ?1 AND reminder_state = 'pending'
+                                 AND scheduled_at > datetime('now')",
+                                [task_id.as_str()],
+                            )
+                            .map_err(|_| RepositoryError::Database)?;
+                    }
+                }
+                insert_audit(&transaction, "task", &task_id, &relation.1, Some(payload))?;
+            }
+        }
+        insert_audit(
+            &transaction,
+            "noticeRelation",
+            relation_id,
+            "accepted",
+            None,
+        )?;
+        transaction.commit().map_err(|_| RepositoryError::Database)
     }
 
     pub fn create_text_notice(
@@ -1241,7 +1413,8 @@ fn candidate_for_confirmation(
 #[cfg(test)]
 mod tests {
     use super::{
-        NewCandidate, NoticeRepository, NoticeState, ReminderRecord, RepositoryError, TaskState,
+        NewCandidate, NoticeRelationRecord, NoticeRepository, NoticeState, ReminderRecord,
+        RepositoryError, TaskState,
     };
     use crate::{security::key_protection::MasterKey, storage::database::EncryptedDatabase};
     use tempfile::tempdir;
@@ -1446,6 +1619,231 @@ mod tests {
             .unwrap();
         let state: String = database.connection().query_row("SELECT reminder_state FROM reminders WHERE idempotency_key = 'task-reminder:deadline'", [], |row| row.get(0)).unwrap();
         assert_eq!(state, "cancelled");
+    }
+
+    #[test]
+    fn accepting_cancel_relation_creates_revision_and_stops_future_reminders() {
+        let database = database();
+        let repository = NoticeRepository::new(database.connection());
+        repository.create_notice("notice-old", "text").unwrap();
+        repository.create_notice("notice-new", "text").unwrap();
+        repository
+            .save_analysis_revision(
+                "notice-old",
+                "analysis-old",
+                "rule-v1",
+                &[NewCandidate {
+                    id: "candidate-old",
+                    payload: "{\"title\":\"活动报名\"}".as_bytes(),
+                }],
+            )
+            .unwrap();
+        repository
+            .confirm_candidate(
+                "candidate-old",
+                "task-old",
+                "task-old-revision-1",
+                "{\"title\":\"活动报名\"}".as_bytes(),
+            )
+            .unwrap();
+        repository
+            .upsert_reminder(&ReminderRecord {
+                id: "reminder-old".to_owned(),
+                task_id: "task-old".to_owned(),
+                scheduled_at: "2999-01-01T00:00:00Z".to_owned(),
+                reminder_state: "pending".to_owned(),
+                idempotency_key: "task-old:deadline".to_owned(),
+                created_at: String::new(),
+            })
+            .unwrap();
+        repository
+            .create_relation(&NoticeRelationRecord {
+                id: "relation-cancel".to_owned(),
+                notice_id: "notice-new".to_owned(),
+                related_notice_id: "notice-old".to_owned(),
+                relation_type: "cancel".to_owned(),
+                relation_state: "suggested".to_owned(),
+                evidence: Vec::new(),
+                created_at: String::new(),
+            })
+            .unwrap();
+
+        repository
+            .accept_relation("relation-cancel", None, Some("candidate-old"))
+            .unwrap();
+
+        let state: String = database
+            .connection()
+            .query_row(
+                "SELECT task_state FROM tasks WHERE id = 'task-old'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let reminder_state: String = database
+            .connection()
+            .query_row(
+                "SELECT reminder_state FROM reminders WHERE id = 'reminder-old'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, TaskState::Cancelled.as_db());
+        assert_eq!(reminder_state, "cancelled");
+        assert_eq!(repository.task_history("task-old").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn accepting_reschedule_relation_revises_only_the_matched_task_and_replans_reminders() {
+        let database = database();
+        let repository = NoticeRepository::new(database.connection());
+        repository.create_notice("notice-old", "text").unwrap();
+        repository.create_notice("notice-new", "text").unwrap();
+        repository
+            .save_analysis_revision(
+                "notice-old",
+                "analysis-old",
+                "rule-v1",
+                &[
+                    NewCandidate {
+                        id: "candidate-matched",
+                        payload: b"{\"title\":\"exam registration\"}",
+                    },
+                    NewCandidate {
+                        id: "candidate-unrelated",
+                        payload: b"{\"title\":\"unrelated task\"}",
+                    },
+                ],
+            )
+            .unwrap();
+        repository
+            .confirm_candidate(
+                "candidate-matched",
+                "task-matched",
+                "task-matched-revision-1",
+                b"{\"title\":\"exam registration\",\"dueAt\":\"2026-09-01T09:00:00Z\"}",
+            )
+            .unwrap();
+        repository
+            .confirm_candidate(
+                "candidate-unrelated",
+                "task-unrelated",
+                "task-unrelated-revision-1",
+                b"{\"title\":\"unrelated task\"}",
+            )
+            .unwrap();
+        repository
+            .upsert_reminder(&ReminderRecord {
+                id: "reminder-matched".to_owned(),
+                task_id: "task-matched".to_owned(),
+                scheduled_at: "2999-01-01T00:00:00Z".to_owned(),
+                reminder_state: "pending".to_owned(),
+                idempotency_key: "task-matched:deadline".to_owned(),
+                created_at: String::new(),
+            })
+            .unwrap();
+        repository
+            .create_relation(&NoticeRelationRecord {
+                id: "relation-reschedule".to_owned(),
+                notice_id: "notice-new".to_owned(),
+                related_notice_id: "notice-old".to_owned(),
+                relation_type: "reschedule".to_owned(),
+                relation_state: "suggested".to_owned(),
+                evidence: Vec::new(),
+                created_at: String::new(),
+            })
+            .unwrap();
+
+        repository
+            .accept_relation(
+                "relation-reschedule",
+                Some(b"{\"title\":\"exam registration\",\"dueAt\":\"2999-02-01T09:00:00Z\"}"),
+                Some("candidate-matched"),
+            )
+            .unwrap();
+
+        let payload: Vec<u8> = database
+            .connection()
+            .query_row(
+                "SELECT revision.payload FROM tasks task JOIN task_revisions revision ON revision.id = task.current_revision_id WHERE task.id = 'task-matched'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let reminder_time: String = database
+            .connection()
+            .query_row(
+                "SELECT scheduled_at FROM reminders WHERE id = 'reminder-matched'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&payload)
+                .unwrap()
+                .get("dueAt")
+                .and_then(serde_json::Value::as_str),
+            Some("2999-02-01T09:00:00Z")
+        );
+        assert_eq!(reminder_time, "2999-02-01T09:00:00Z");
+        assert_eq!(repository.task_history("task-matched").unwrap().len(), 2);
+        assert_eq!(repository.task_history("task-unrelated").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn rejecting_relation_does_not_change_task_or_reminder() {
+        let database = database();
+        let repository = NoticeRepository::new(database.connection());
+        repository.create_notice("notice-old", "text").unwrap();
+        repository.create_notice("notice-new", "text").unwrap();
+        repository
+            .create_manual_task("task-old", "task-old-revision-1", b"{\"title\":\"keep\"}")
+            .unwrap();
+        repository
+            .upsert_reminder(&ReminderRecord {
+                id: "reminder-old".to_owned(),
+                task_id: "task-old".to_owned(),
+                scheduled_at: "2999-01-01T00:00:00Z".to_owned(),
+                reminder_state: "pending".to_owned(),
+                idempotency_key: "task-old:deadline".to_owned(),
+                created_at: String::new(),
+            })
+            .unwrap();
+        repository
+            .create_relation(&NoticeRelationRecord {
+                id: "relation-reject".to_owned(),
+                notice_id: "notice-new".to_owned(),
+                related_notice_id: "notice-old".to_owned(),
+                relation_type: "cancel".to_owned(),
+                relation_state: "suggested".to_owned(),
+                evidence: Vec::new(),
+                created_at: String::new(),
+            })
+            .unwrap();
+
+        repository
+            .set_relation_state("relation-reject", "rejected")
+            .unwrap();
+
+        let state: String = database
+            .connection()
+            .query_row(
+                "SELECT task_state FROM tasks WHERE id = 'task-old'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let reminder_state: String = database
+            .connection()
+            .query_row(
+                "SELECT reminder_state FROM reminders WHERE id = 'reminder-old'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, TaskState::Todo.as_db());
+        assert_eq!(reminder_state, "pending");
+        assert_eq!(repository.task_history("task-old").unwrap().len(), 1);
     }
 
     #[test]

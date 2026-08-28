@@ -1,6 +1,7 @@
 use std::{io::Cursor, path::Path};
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
@@ -563,30 +564,73 @@ pub fn suggest_notice_relations(
     let candidates = repository
         .list_candidates(None)
         .map_err(map_repository_error)?;
-    let titles = candidates
+    let candidate_contexts = candidates
         .iter()
         .filter_map(|candidate| {
-            payload_title(&candidate.payload).map(|title| (candidate.notice_id.as_str(), title))
+            let payload = serde_json::from_slice::<serde_json::Value>(&candidate.payload).ok()?;
+            let title = payload.get("title")?.as_str()?.to_owned();
+            let source_text = repository
+                .notice_detail(&candidate.notice_id)
+                .ok()
+                .and_then(|detail| detail.original_text)
+                .unwrap_or_default();
+            Some((
+                candidate.id.as_str(),
+                candidate.notice_id.as_str(),
+                title,
+                source_text,
+                payload,
+            ))
         })
         .collect::<Vec<_>>();
-    for (other_notice_id, title) in titles.iter().filter(|(id, _)| *id == notice_id) {
-        let _ = other_notice_id;
+    for (candidate_id, _, title, source_text, payload) in candidate_contexts
+        .iter()
+        .filter(|(_, id, _, _, _)| *id == notice_id)
+    {
         let normalized = normalize_key(title);
-        for (comparison_notice_id, comparison_title) in
-            titles.iter().filter(|(id, _)| *id != notice_id)
+        for (
+            comparison_candidate_id,
+            comparison_notice_id,
+            comparison_title,
+            comparison_source_text,
+            comparison_payload,
+        ) in candidate_contexts
+            .iter()
+            .filter(|(_, id, _, _, _)| *id != notice_id)
         {
-            if normalized == normalize_key(comparison_title) {
+            let comparison_normalized = normalize_key(comparison_title);
+            let match_evidence = relation_match_evidence(
+                title,
+                source_text,
+                payload,
+                comparison_title,
+                comparison_source_text,
+                comparison_payload,
+            );
+            if let Some(match_evidence) = match_evidence {
+                let relation_type =
+                    relation_type(title, source_text, normalized == comparison_normalized);
                 let evidence = serde_json::to_vec(&serde_json::json!({
                     "matchedTitle": title,
                     "otherTitle": comparison_title,
-                    "reason": "normalizedTitle",
+                    "reason": match_evidence.reason,
+                    "normalizedHash": normalized_hash(title),
+                    "relatedNormalizedHash": normalized_hash(comparison_title),
+                    "normalizedContentHash": normalized_hash(source_text),
+                    "relatedNormalizedContentHash": normalized_hash(comparison_source_text),
+                    "textSimilarity": match_evidence.text_similarity,
+                    "fieldMatches": match_evidence.field_matches,
+                    "proposedCandidateId": candidate_id,
+                    "existingCandidateId": comparison_candidate_id,
+                    "proposedPayload": payload,
+                    "existingPayload": comparison_payload,
                 }))
                 .map_err(|_| CaptureError::Storage)?;
                 let relation = NoticeRelationRecord {
                     id: new_id(),
                     notice_id: notice_id.to_owned(),
                     related_notice_id: (*comparison_notice_id).to_owned(),
-                    relation_type: "duplicate".to_owned(),
+                    relation_type: relation_type.to_owned(),
                     relation_state: "suggested".to_owned(),
                     evidence,
                     created_at: String::new(),
@@ -620,8 +664,34 @@ pub fn resolve_notice_relation(
     accepted: bool,
 ) -> Result<(), CaptureError> {
     let database = open_database(app_data_directory)?;
-    NoticeRepository::new(database.connection())
-        .set_relation_state(relation_id, if accepted { "accepted" } else { "rejected" })
+    let repository = NoticeRepository::new(database.connection());
+    if !accepted {
+        return repository
+            .set_relation_state(relation_id, "rejected")
+            .map_err(map_repository_error);
+    }
+    let relation = repository
+        .relation_by_id(relation_id)
+        .map_err(map_repository_error)?;
+    let proposed_payload = serde_json::from_slice::<serde_json::Value>(&relation.evidence)
+        .ok()
+        .and_then(|evidence| evidence.get("proposedPayload").cloned())
+        .map(validated_payload)
+        .transpose()?;
+    let existing_candidate_id = serde_json::from_slice::<serde_json::Value>(&relation.evidence)
+        .ok()
+        .and_then(|evidence| {
+            evidence
+                .get("existingCandidateId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        });
+    repository
+        .accept_relation(
+            relation_id,
+            proposed_payload.as_deref(),
+            existing_candidate_id.as_deref(),
+        )
         .map_err(map_repository_error)
 }
 
@@ -723,12 +793,98 @@ fn relation_to_contract(relation: NoticeRelationRecord) -> Option<NoticeRelation
     })
 }
 
-fn payload_title(payload: &[u8]) -> Option<String> {
-    serde_json::from_slice::<serde_json::Value>(payload)
-        .ok()?
-        .get("title")?
-        .as_str()
-        .map(str::to_owned)
+fn relation_type(title: &str, source_text: &str, exact_title_match: bool) -> &'static str {
+    if contains_any(title, source_text, &["取消", "停止", "作废"]) {
+        "cancel"
+    } else if contains_any(title, source_text, &["改期", "延期", "调整", "变更"]) {
+        "reschedule"
+    } else if exact_title_match {
+        "duplicate"
+    } else {
+        "supplement"
+    }
+}
+
+struct RelationMatchEvidence {
+    reason: &'static str,
+    text_similarity: f32,
+    field_matches: Vec<&'static str>,
+}
+
+fn relation_match_evidence(
+    title: &str,
+    source_text: &str,
+    payload: &serde_json::Value,
+    comparison_title: &str,
+    comparison_source_text: &str,
+    comparison_payload: &serde_json::Value,
+) -> Option<RelationMatchEvidence> {
+    let left_title = normalize_key(title);
+    let right_title = normalize_key(comparison_title);
+    if left_title == right_title {
+        return Some(RelationMatchEvidence {
+            reason: "normalizedHash",
+            text_similarity: 1.0,
+            field_matches: matching_structured_fields(payload, comparison_payload),
+        });
+    }
+
+    let text_similarity = character_similarity(
+        &format!("{title} {source_text}"),
+        &format!("{comparison_title} {comparison_source_text}"),
+    );
+    let field_matches = matching_structured_fields(payload, comparison_payload);
+    let related_titles = left_title.len() >= 4
+        && right_title.len() >= 4
+        && (left_title.contains(&right_title) || right_title.contains(&left_title));
+    if related_titles
+        || text_similarity >= 0.42
+        || (text_similarity >= 0.24 && !field_matches.is_empty())
+    {
+        Some(RelationMatchEvidence {
+            reason: if !field_matches.is_empty() {
+                "structuredFieldMatch"
+            } else {
+                "textSimilarity"
+            },
+            text_similarity,
+            field_matches,
+        })
+    } else {
+        None
+    }
+}
+
+fn matching_structured_fields(
+    payload: &serde_json::Value,
+    comparison_payload: &serde_json::Value,
+) -> Vec<&'static str> {
+    ["location", "submissionUrl", "audience", "required"]
+        .into_iter()
+        .filter(|field| {
+            let left = payload.get(*field);
+            let right = comparison_payload.get(*field);
+            left.is_some() && left == right && !left.is_some_and(serde_json::Value::is_null)
+        })
+        .collect()
+}
+
+fn character_similarity(left: &str, right: &str) -> f32 {
+    let left = normalize_key(left);
+    let right = normalize_key(right);
+    let left_characters = left.chars().collect::<std::collections::BTreeSet<_>>();
+    let right_characters = right.chars().collect::<std::collections::BTreeSet<_>>();
+    let union = left_characters.union(&right_characters).count();
+    if union == 0 {
+        return 0.0;
+    }
+    left_characters.intersection(&right_characters).count() as f32 / union as f32
+}
+
+fn contains_any(title: &str, source_text: &str, keywords: &[&str]) -> bool {
+    keywords
+        .iter()
+        .any(|keyword| title.contains(keyword) || source_text.contains(keyword))
 }
 
 fn normalize_key(value: &str) -> String {
@@ -739,6 +895,11 @@ fn normalize_key(value: &str) -> String {
         })
         .flat_map(char::to_lowercase)
         .collect()
+}
+
+fn normalized_hash(value: &str) -> String {
+    let digest = Sha256::digest(normalize_key(value).as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn load_key(
@@ -977,8 +1138,8 @@ fn webp_dimensions(bytes: &[u8]) -> Result<(u32, u32), CaptureError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        image_preview, import_image, import_text, list_notices, notice_detail, validate_image,
-        CaptureError,
+        image_preview, import_image, import_text, list_notices, notice_detail,
+        relation_match_evidence, relation_type, validate_image, CaptureError,
     };
     use crate::contracts::NoticeStateV1;
     use tempfile::tempdir;
@@ -1051,6 +1212,50 @@ mod tests {
                 .as_deref(),
             Some("同一条通知")
         );
+    }
+
+    #[test]
+    fn relation_matching_uses_hash_text_and_structured_fields_without_matching_unrelated_notices() {
+        let exact = relation_match_evidence(
+            "综合测评报名",
+            "请在本周内完成综合测评报名。",
+            &serde_json::json!({ "location": "学生中心", "required": true }),
+            "综合测评报名",
+            "请在本周内完成综合测评报名。",
+            &serde_json::json!({ "location": "学生中心", "required": true }),
+        )
+        .unwrap();
+        assert_eq!(exact.reason, "normalizedHash");
+        assert!(exact.field_matches.contains(&"location"));
+
+        let changed = relation_match_evidence(
+            "关于综合测评报名",
+            "综合测评报名截止时间调整至下周五。",
+            &serde_json::json!({ "audience": "2026级" }),
+            "综合测评报名",
+            "请同学们完成综合测评报名。",
+            &serde_json::json!({ "audience": "2026级" }),
+        )
+        .unwrap();
+        assert_eq!(changed.reason, "structuredFieldMatch");
+        assert_eq!(
+            relation_type(
+                "关于综合测评报名",
+                "综合测评报名截止时间调整至下周五。",
+                false
+            ),
+            "reschedule"
+        );
+
+        assert!(relation_match_evidence(
+            "宿舍晚归检查",
+            "今晚开展宿舍晚归检查。",
+            &serde_json::json!({}),
+            "食堂满意度问卷",
+            "请填写食堂满意度问卷。",
+            &serde_json::json!({}),
+        )
+        .is_none());
     }
 
     #[test]

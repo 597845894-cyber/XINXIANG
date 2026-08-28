@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     fs,
     io::{Cursor, Read, Write},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use aes_gcm::{

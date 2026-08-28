@@ -750,10 +750,7 @@ fn find_absolute_dates(line: &str) -> Vec<String> {
 }
 
 fn parse_date_expression(value: &str) -> Option<(i32, u32, u32)> {
-    let normalized = value
-        .replace('年', "-")
-        .replace('月', "-")
-        .replace('日', "");
+    let normalized = value.replace(['年', '月'], "-").replace('日', "");
     let parts = normalized
         .split(['-', '/'])
         .filter(|part| !part.is_empty())

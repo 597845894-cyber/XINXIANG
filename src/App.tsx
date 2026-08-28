@@ -1049,7 +1049,13 @@ function ReviewView() {
         ),
       );
       setMessage(
-        accepted ? "已接受关联建议，任务不会被静默修改。" : "已拒绝关联建议，现有任务保持不变。",
+        accepted
+          ? relation.relationType === "cancel"
+            ? "已确认取消，关联待办任务和未来提醒已在同一操作中停止。"
+            : relation.relationType === "reschedule"
+              ? "已确认改期，关联待办任务已生成新修订并重排未来提醒。"
+              : "已接受关联建议，现有任务保持不变。"
+          : "已拒绝关联建议，现有任务保持不变。",
       );
     } catch {
       setMessage("关联建议处理失败。");
@@ -1164,31 +1170,55 @@ function ReviewView() {
           {relations.length ? (
             <div className="relation-panel" aria-label="通知关联建议">
               <strong>通知关联建议</strong>
-              {relations.map((relation) => (
-                <div className="relation-row" key={relation.id}>
-                  <span>{relation.relationType}</span>
-                  <small>{JSON.stringify(relation.evidence)}</small>
-                  <span className="status-label neutral">{relation.relationState}</span>
-                  {relation.relationState === "suggested" ? (
-                    <>
-                      <button
-                        className="secondary-button"
-                        onClick={() => void resolveRelation(relation, true)}
-                        type="button"
-                      >
-                        接受
-                      </button>
-                      <button
-                        className="secondary-button"
-                        onClick={() => void resolveRelation(relation, false)}
-                        type="button"
-                      >
-                        拒绝
-                      </button>
-                    </>
-                  ) : null}
-                </div>
-              ))}
+              {relations.map((relation) => {
+                const evidence = relation.evidence as {
+                  existingPayload?: Partial<TaskCandidatePayloadV1>;
+                  proposedPayload?: Partial<TaskCandidatePayloadV1>;
+                  reason?: string;
+                };
+                const relationLabel = {
+                  duplicate: "可能重复",
+                  supplement: "补充通知",
+                  reschedule: "改期建议",
+                  cancel: "取消建议",
+                }[relation.relationType];
+                return (
+                  <div className="relation-row" key={relation.id}>
+                    <strong>{relationLabel}</strong>
+                    <small>
+                      现有：{evidence.existingPayload?.title ?? "未提供"}
+                      {evidence.existingPayload?.dueAt
+                        ? `，${new Date(evidence.existingPayload.dueAt).toLocaleString()}`
+                        : ""}
+                    </small>
+                    <small>
+                      新通知：{evidence.proposedPayload?.title ?? "未提供"}
+                      {evidence.proposedPayload?.dueAt
+                        ? `，${new Date(evidence.proposedPayload.dueAt).toLocaleString()}`
+                        : ""}
+                    </small>
+                    <span className="status-label neutral">{relation.relationState}</span>
+                    {relation.relationState === "suggested" ? (
+                      <>
+                        <button
+                          className="secondary-button"
+                          onClick={() => void resolveRelation(relation, true)}
+                          type="button"
+                        >
+                          接受
+                        </button>
+                        <button
+                          className="secondary-button"
+                          onClick={() => void resolveRelation(relation, false)}
+                          type="button"
+                        >
+                          拒绝
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           ) : null}
           <div className="page-actions">
