@@ -18,8 +18,9 @@ New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
 # openssl-src requires Perl on Windows; reuse an existing installation when
 # available instead of downloading or installing another toolchain.
 $perlBin = 'C:\Strawberry\perl\bin'
+$strawberryBin = 'C:\Strawberry\c\bin'
 if (Test-Path (Join-Path $perlBin 'perl.exe')) {
-  $env:Path = "$perlBin;$env:Path"
+  $env:Path = "$perlBin;$strawberryBin;$env:Path"
 }
 
 if ($Action -eq 'Format') {
